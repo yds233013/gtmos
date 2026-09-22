@@ -9,7 +9,7 @@ from gtmos.domain.pipeline import (
     lifecycle_for_funnel,
 )
 from gtmos.domain.rules import Condition, evaluate, evaluate_all
-from gtmos.domain.workflows import WorkflowDefinition, backoff_seconds, idempotency_key, DEFAULT_WORKFLOWS
+from gtmos.domain.workflows import DEFAULT_WORKFLOWS, WorkflowDefinition, backoff_seconds, idempotency_key
 
 
 def test_condition_operators():
@@ -67,9 +67,12 @@ def test_workflow_definitions_validate():
     with pytest.raises(ValidationError):
         WorkflowDefinition.model_validate({"trigger": {"type": "manual"}, "steps": [{"key": "a", "action": "rm_rf"}]})
     with pytest.raises(ValidationError):
-        WorkflowDefinition.model_validate({"trigger": {"type": "manual"},
-                                           "steps": [{"key": "a", "action": "route_account"},
-                                                     {"key": "a", "action": "sync_crm"}]})
+        WorkflowDefinition.model_validate(
+            {
+                "trigger": {"type": "manual"},
+                "steps": [{"key": "a", "action": "route_account"}, {"key": "a", "action": "sync_crm"}],
+            }
+        )
     assert idempotency_key("wf", 2, "signal.created", "s1") == "wf:wf:v2:signal.created:s1"
     assert [backoff_seconds(i) for i in (1, 2, 3)] == [2.0, 8.0, 32.0]
     assert backoff_seconds(10) == 300.0

@@ -58,14 +58,30 @@ class TechnicalProfile(BaseModel):
     ai_team_strong: int = 50
     llm_stack: list[str] = Field(
         default_factory=lambda: [
-            "OpenAI", "Anthropic", "LangChain", "LlamaIndex", "Pinecone", "Weaviate",
-            "pgvector", "Hugging Face", "vLLM", "Ray", "MLflow", "Weights & Biases",
+            "OpenAI",
+            "Anthropic",
+            "LangChain",
+            "LlamaIndex",
+            "Pinecone",
+            "Weaviate",
+            "pgvector",
+            "Hugging Face",
+            "vLLM",
+            "Ray",
+            "MLflow",
+            "Weights & Biases",
         ]
     )
     platform_stack: list[str] = Field(
         default_factory=lambda: [
-            "Kubernetes", "Snowflake", "Databricks", "Datadog", "AWS SageMaker", "Vertex AI",
-            "Kafka", "Terraform",
+            "Kubernetes",
+            "Snowflake",
+            "Databricks",
+            "Datadog",
+            "AWS SageMaker",
+            "Vertex AI",
+            "Kafka",
+            "Terraform",
         ]
     )
 
@@ -123,15 +139,19 @@ def default_icp() -> ICPDefinition:
         funding_stages=["Series B", "Series C", "Series D+", "Public"],
         min_growth_rate=0.05,
         buyer_personas=[
-            "CTO", "VP Engineering", "Head of AI", "Head of ML", "ML Platform Lead",
+            "CTO",
+            "VP Engineering",
+            "Head of AI",
+            "Head of ML",
+            "ML Platform Lead",
             "Director of AI Infrastructure",
         ],
         positive_signals={
-            "ai_hiring_surge": 9,
-            "ai_product_launch": 8,
-            "job_posting": 5,
-            "tech_adoption": 4,
-            "pricing_page_visit": 6,
+            "ai_hiring_surge": 10,
+            "ai_product_launch": 9,
+            "job_posting": 6,
+            "tech_adoption": 5,
+            "pricing_page_visit": 7,
             "funding_round": 7,
             "executive_hire": 5,
             "expansion": 2,

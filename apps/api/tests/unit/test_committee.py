@@ -35,8 +35,10 @@ def test_manual_override_wins_and_persists():
 
 
 def test_do_not_contact_and_invalid_email_are_penalized():
-    cs = [ContactFacts("a", "A", "Head of AI", "director", "ai_ml", do_not_contact=True),
-          ContactFacts("b", "B", "Director of Machine Learning", "director", "ai_ml")]
+    cs = [
+        ContactFacts("a", "A", "Head of AI", "director", "ai_ml", do_not_contact=True),
+        ContactFacts("b", "B", "Director of Machine Learning", "director", "ai_ml"),
+    ]
     assert infer_committee(cs).holder("champion").contact_id == "b"
 
 

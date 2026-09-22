@@ -149,9 +149,7 @@ class FieldProvenance(IdMixin, Base):
     source: Mapped[str] = mapped_column(String(60))  # provider key | manual | crm | seed
     confidence: Mapped[float] = mapped_column(Float)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("enrichment_runs.id", ondelete="SET NULL")
-    )
+    enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("enrichment_runs.id", ondelete="SET NULL"))
     is_manual_lock: Mapped[bool] = mapped_column(default=False)
 
 

@@ -17,10 +17,8 @@ from typing import Any
 SELLER_PROOF_LIBRARY: dict[str, str] = {
     "eval_gates": "Sentinel runs regression evals on every prompt, model or agent change before it ships.",
     "agent_tracing": "Sentinel traces each agent step and tool call, so failures are debuggable in minutes.",
-    "online_monitoring": "Sentinel scores live traffic for hallucination and policy violations and alerts "
-                         "on drift.",
-    "team_standards": "Sentinel gives every AI team the same evaluation datasets, metrics and release "
-                      "checklist.",
+    "online_monitoring": "Sentinel scores live traffic for hallucination and policy violations and alerts on drift.",
+    "team_standards": "Sentinel gives every AI team the same evaluation datasets, metrics and release checklist.",
     "free_to_prod": "Free workspaces can be upgraded in place: traces, datasets and evals carry over.",
 }
 
@@ -129,50 +127,82 @@ def run_guardrails(content: DraftContent, inp: PersonalizationInput) -> list[Gua
     grounded_text += " " + " ".join(SELLER_PROOF_LIBRARY.values()) + " " + " ".join(CTA_OPTIONS.values())
     grounded_text += " 90-day 90 days 1 business day"
     ungrounded = sorted(_numbers(full) - _numbers(grounded_text))
-    results.append(GuardrailResult(
-        "numbers_grounded", not ungrounded, True,
-        "Every number appears in cited evidence." if not ungrounded
-        else f"Numbers not found in evidence: {', '.join(ungrounded)}"))
+    results.append(
+        GuardrailResult(
+            "numbers_grounded",
+            not ungrounded,
+            True,
+            "Every number appears in cited evidence."
+            if not ungrounded
+            else f"Numbers not found in evidence: {', '.join(ungrounded)}",
+        )
+    )
 
     hits = [why for pat, why in BANNED_PATTERNS if re.search(pat, full, flags=re.IGNORECASE)]
-    results.append(GuardrailResult("no_unverifiable_claims", not hits, True,
-                                   "No banned claim patterns." if not hits else "; ".join(hits)))
+    results.append(
+        GuardrailResult(
+            "no_unverifiable_claims", not hits, True, "No banned claim patterns." if not hits else "; ".join(hits)
+        )
+    )
 
     sig = inp.anchor_signal
     if sig is None:
-        results.append(GuardrailResult("signal_verified", True, False,
-                                       "No signal anchor; message relies on ICP fit only (weaker)."))
+        results.append(
+            GuardrailResult(
+                "signal_verified", True, False, "No signal anchor; message relies on ICP fit only (weaker)."
+            )
+        )
     else:
         fresh = inp.now - sig["observed_at"] <= SIGNAL_MAX_AGE
         confident = sig["confidence"] >= SIGNAL_MIN_CONFIDENCE
-        results.append(GuardrailResult(
-            "signal_verified", fresh and confident, True,
-            f"Anchor signal '{sig['title']}' confidence {sig['confidence']:.0%}, "
-            f"{(inp.now - sig['observed_at']).days} days old"
-            + ("" if fresh and confident else ": too old or not confident enough to reference")))
+        results.append(
+            GuardrailResult(
+                "signal_verified",
+                fresh and confident,
+                True,
+                f"Anchor signal '{sig['title']}' confidence {sig['confidence']:.0%}, "
+                f"{(inp.now - sig['observed_at']).days} days old"
+                + ("" if fresh and confident else ": too old or not confident enough to reference"),
+            )
+        )
 
     if content.channel == "email":
         words = len(body.split())
-        results.append(GuardrailResult("length", words <= MAX_EMAIL_WORDS, False,
-                                       f"{words} words (limit {MAX_EMAIL_WORDS})."))
+        results.append(
+            GuardrailResult("length", words <= MAX_EMAIL_WORDS, False, f"{words} words (limit {MAX_EMAIL_WORDS}).")
+        )
     elif content.channel == "linkedin":
-        results.append(GuardrailResult("length", len(body) <= MAX_LINKEDIN_CHARS, True,
-                                       f"{len(body)} characters (limit {MAX_LINKEDIN_CHARS})."))
+        results.append(
+            GuardrailResult(
+                "length", len(body) <= MAX_LINKEDIN_CHARS, True, f"{len(body)} characters (limit {MAX_LINKEDIN_CHARS})."
+            )
+        )
 
     if content.channel in ("email", "linkedin"):
         has_q = "?" in body
-        results.append(GuardrailResult("has_cta", has_q, False,
-                                       "Ends with a clear question/CTA." if has_q else "No CTA found."))
+        results.append(
+            GuardrailResult("has_cta", has_q, False, "Ends with a clear question/CTA." if has_q else "No CTA found.")
+        )
         name = inp.account.get("name", "")
-        results.append(GuardrailResult("personalized", bool(name) and name in full, False,
-                                       "References the account by name." if name in full
-                                       else "Does not reference the account."))
+        results.append(
+            GuardrailResult(
+                "personalized",
+                bool(name) and name in full,
+                False,
+                "References the account by name." if name in full else "Does not reference the account.",
+            )
+        )
 
     c = inp.contact
     reachable = not c.get("do_not_contact") and c.get("email_status") != "invalid"
-    results.append(GuardrailResult(
-        "contact_reachable", reachable, True,
-        "Contact is reachable." if reachable else "Contact is do-not-contact or has an invalid email."))
+    results.append(
+        GuardrailResult(
+            "contact_reachable",
+            reachable,
+            True,
+            "Contact is reachable." if reachable else "Contact is do-not-contact or has an invalid email.",
+        )
+    )
     return results
 
 
@@ -198,8 +228,9 @@ def generate_messages(inp: PersonalizationInput) -> list[DraftContent]:
     used_refs = [sig["ref"]] if sig and sig.get("ref") else []
     evidence_used = [e for e in inp.evidence if e.get("ref") in used_refs]
 
-    opener = (f"Saw that {company} {sig['short']}." if sig
-              else f"I've been following how {company} is building with LLMs.")
+    opener = (
+        f"Saw that {company} {sig['short']}." if sig else f"I've been following how {company} is building with LLMs."
+    )
     email_body = (
         f"Hi {first},\n\n"
         f"{opener} In our experience, {chain['pain_hypothesis']}.\n\n"
@@ -211,8 +242,9 @@ def generate_messages(inp: PersonalizationInput) -> list[DraftContent]:
     email = DraftContent("email", subject, email_body, inp.angle, chain, evidence_used)
 
     li_body = f"Hi {first}, {opener[0].lower() + opener[1:]} {chain['question']} {CTA_OPTIONS['linkedin']}"
-    linkedin = DraftContent("linkedin", None, li_body, inp.angle, {**chain, "cta": CTA_OPTIONS["linkedin"]},
-                            evidence_used)
+    linkedin = DraftContent(
+        "linkedin", None, li_body, inp.angle, {**chain, "cta": CTA_OPTIONS["linkedin"]}, evidence_used
+    )
 
     ev_lines = "\n".join(f"- [{e['ref']}] {e['label']}" for e in inp.evidence[:8])
     prep = (

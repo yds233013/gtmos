@@ -5,11 +5,29 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-FREE_MAIL_DOMAINS = frozenset({
-    "gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "icloud.com",
-    "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "yandex.com", "zoho.com", "mail.com",
-    "fastmail.com", "hey.com", "qq.com", "163.com",
-})
+FREE_MAIL_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "yahoo.com",
+        "outlook.com",
+        "hotmail.com",
+        "live.com",
+        "icloud.com",
+        "me.com",
+        "aol.com",
+        "proton.me",
+        "protonmail.com",
+        "gmx.com",
+        "yandex.com",
+        "zoho.com",
+        "mail.com",
+        "fastmail.com",
+        "hey.com",
+        "qq.com",
+        "163.com",
+    }
+)
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
 _DOMAIN_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")

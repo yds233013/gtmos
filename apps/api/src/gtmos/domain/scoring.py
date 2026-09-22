@@ -130,8 +130,9 @@ def _score_fit(icp: ICPDefinition, a: AccountFacts, budget: float) -> list[Compo
         pts, why = 0.0, "Industry unknown. Enrichment needed before this can score."
     else:
         pts, why = 0.0, f"{a.industry} is outside the target industries."
-    comps.append(Component("fit", "industry", "Industry", _r(pts), _r(mx), why,
-                           [{"field": "industry", "value": a.industry}]))
+    comps.append(
+        Component("fit", "industry", "Industry", _r(pts), _r(mx), why, [{"field": "industry", "value": a.industry}])
+    )
 
     mx = budget * FIT_SHARES["company_size"]
     s = icp.size
@@ -140,18 +141,25 @@ def _score_fit(icp: ICPDefinition, a: AccountFacts, budget: float) -> list[Compo
         pts, why = 0.0, "Employee count unknown. Enrichment needed."
     elif s.sweet_spot_min <= n <= s.sweet_spot_max:
         pts = mx
-        why = (f"{_fmt_int(n)} employees is inside the sweet spot "
-               f"({_fmt_int(s.sweet_spot_min)}–{_fmt_int(s.sweet_spot_max)}).")
+        why = (
+            f"{_fmt_int(n)} employees is inside the sweet spot "
+            f"({_fmt_int(s.sweet_spot_min)}–{_fmt_int(s.sweet_spot_max)})."
+        )
     elif s.min_employees <= n <= s.max_employees:
         pts = mx * 0.65
-        why = (f"{_fmt_int(n)} employees is within the target range "
-               f"({_fmt_int(s.min_employees)}–{_fmt_int(s.max_employees)}) but outside the sweet spot.")
+        why = (
+            f"{_fmt_int(n)} employees is within the target range "
+            f"({_fmt_int(s.min_employees)}–{_fmt_int(s.max_employees)}) but outside the sweet spot."
+        )
     elif n > s.max_employees:
         pts, why = mx * 0.4, f"{_fmt_int(n)} employees is above the target range (long sales cycle risk)."
     else:
         pts, why = mx * 0.15, f"{_fmt_int(n)} employees is below the target range."
-    comps.append(Component("fit", "company_size", "Company size", _r(pts), _r(mx), why,
-                           [{"field": "employee_count", "value": n}]))
+    comps.append(
+        Component(
+            "fit", "company_size", "Company size", _r(pts), _r(mx), why, [{"field": "employee_count", "value": n}]
+        )
+    )
 
     mx = budget * FIT_SHARES["geography"]
     if a.region in icp.primary_regions:
@@ -162,8 +170,17 @@ def _score_fit(icp: ICPDefinition, a: AccountFacts, budget: float) -> list[Compo
         pts, why = 0.0, "Region unknown."
     else:
         pts, why = 0.0, f"Region {a.region} is not currently served."
-    comps.append(Component("fit", "geography", "Geography", _r(pts), _r(mx), why,
-                           [{"field": "region", "value": a.region}, {"field": "country", "value": a.country}]))
+    comps.append(
+        Component(
+            "fit",
+            "geography",
+            "Geography",
+            _r(pts),
+            _r(mx),
+            why,
+            [{"field": "region", "value": a.region}, {"field": "country", "value": a.country}],
+        )
+    )
     return comps
 
 
@@ -183,26 +200,59 @@ def _score_technical(icp: ICPDefinition, a: AccountFacts, budget: float) -> list
         pts, why = mx * 0.25, f"Small AI/ML team (~{size}); may not feel reliability pain yet."
     else:
         pts, why = 0.0, "No dedicated AI/ML team detected."
-    comps.append(Component("technical", "ai_team", "AI/ML team", _r(pts), _r(mx), why,
-                           [{"field": "ai_team_size", "value": size}]))
+    comps.append(
+        Component(
+            "technical", "ai_team", "AI/ML team", _r(pts), _r(mx), why, [{"field": "ai_team_size", "value": size}]
+        )
+    )
 
     techs = set(a.technologies)
     llm = sorted(techs & set(t.llm_stack))
     mx = budget * TECH_SHARES["llm_stack"]
     ratio = {0: 0.0, 1: 0.4, 2: 0.7}.get(len(llm), 1.0)
-    why = (f"Runs {len(llm)} LLM-stack technologies: {', '.join(llm)}." if llm
-           else "No LLM application stack detected in technographics.")
-    comps.append(Component("technical", "llm_stack", "LLM stack", _r(mx * ratio), _r(mx), why,
-                           [{"field": "technologies", "value": llm}]))
+    why = (
+        f"Runs {len(llm)} LLM-stack technologies: {', '.join(llm)}."
+        if llm
+        else "No LLM application stack detected in technographics."
+    )
+    comps.append(
+        Component(
+            "technical",
+            "llm_stack",
+            "LLM stack",
+            _r(mx * ratio),
+            _r(mx),
+            why,
+            [{"field": "technologies", "value": llm}],
+        )
+    )
 
     plat = sorted(techs & set(t.platform_stack))
     mx = budget * TECH_SHARES["platform"]
     ratio = {0: 0.0, 1: 0.5}.get(len(plat), 1.0)
-    why = (f"Production platform maturity: {', '.join(plat)}." if plat
-           else "No production data/infra platform detected.")
-    comps.append(Component("technical", "platform", "Platform maturity", _r(mx * ratio), _r(mx), why,
-                           [{"field": "technologies", "value": plat}]))
+    why = f"Production platform maturity: {', '.join(plat)}." if plat else "No production data/infra platform detected."
+    comps.append(
+        Component(
+            "technical",
+            "platform",
+            "Platform maturity",
+            _r(mx * ratio),
+            _r(mx),
+            why,
+            [{"field": "technologies", "value": plat}],
+        )
+    )
     return comps
+
+
+def signal_value(s: SignalFact, typical_strength: float, half_life_days: float, now: datetime) -> float:
+    """0..1 value of one signal: confidence × relative strength × time decay.
+
+    Strength is judged relative to what is typical for the signal type (a $120M round vs. a $5M one),
+    so a fresh, confident, typical signal earns ~its full budget and decays from there.
+    """
+    relative = min(s.strength / typical_strength, 1.25) if typical_strength > 0 else 1.0
+    return min(1.0, s.confidence * relative * decay_factor(s.observed_at, now, half_life_days))
 
 
 def _age_phrase(observed_at: datetime, now: datetime) -> str:
@@ -214,9 +264,7 @@ def _age_phrase(observed_at: datetime, now: datetime) -> str:
     return f"{days} days ago"
 
 
-def _signal_components(
-    icp: ICPDefinition, category: str, signals: list[SignalFact], now: datetime
-) -> list[Component]:
+def _signal_components(icp: ICPDefinition, category: str, signals: list[SignalFact], now: datetime) -> list[Component]:
     comps: list[Component] = []
     by_type: dict[str, list[SignalFact]] = {}
     for s in signals:
@@ -232,8 +280,7 @@ def _signal_components(
         if not found:
             continue
         valued = sorted(
-            ((s.strength * s.confidence * decay_factor(s.observed_at, now, spec.half_life_days), s)
-             for s in found),
+            ((signal_value(s, spec.default_strength, spec.half_life_days, now), s) for s in found),
             key=lambda p: (-p[0], p[1].id),
         )
         best_val, best = valued[0]
@@ -241,19 +288,37 @@ def _signal_components(
         raw = min(1.0, best_val + extra)
         pts = max_pts * raw
         more = f" (+{len(valued) - 1} more)" if len(valued) > 1 else ""
-        why = (f"{best.title}, observed {_age_phrase(best.observed_at, now)}{more}. "
-               f"Strength {best.strength:.2f} × confidence {best.confidence:.2f}, "
-               f"decayed with a {spec.half_life_days:g}-day half-life.")
-        comps.append(Component(
-            category, f"signal:{sig_type}", spec.name, _r(pts), _r(max_pts), why,
-            [{"signal_id": s.id, "title": s.title, "observed_at": s.observed_at.isoformat(),
-              "value": round(v, 3)} for v, s in valued[:5]],
-        ))
+        why = (
+            f"{best.title}, observed {_age_phrase(best.observed_at, now)}{more}. "
+            f"Confidence {best.confidence:.0%}, strength {best.strength:.2f} (typical "
+            f"{spec.default_strength:.2f}), {spec.half_life_days:g}-day half-life → {raw:.0%} of "
+            f"{max_pts:g} pts."
+        )
+        comps.append(
+            Component(
+                category,
+                f"signal:{sig_type}",
+                spec.name,
+                _r(pts),
+                _r(max_pts),
+                why,
+                [
+                    {
+                        "signal_id": s.id,
+                        "title": s.title,
+                        "observed_at": s.observed_at.isoformat(),
+                        "value": round(v, 3),
+                    }
+                    for v, s in valued[:5]
+                ],
+            )
+        )
     return comps
 
 
-def _score_timing(icp: ICPDefinition, a: AccountFacts, signals: list[SignalFact], now: datetime,
-                  budget: float) -> list[Component]:
+def _score_timing(
+    icp: ICPDefinition, a: AccountFacts, signals: list[SignalFact], now: datetime, budget: float
+) -> list[Component]:
     comps = _signal_components(icp, "timing", signals, now)
     mx = budget * TIMING_GROWTH_SHARE
     g = a.employee_growth_12m
@@ -267,13 +332,23 @@ def _score_timing(icp: ICPDefinition, a: AccountFacts, signals: list[SignalFact]
         pts, why = mx * 0.25, f"Modest headcount growth ({g:.0%})."
     else:
         pts, why = 0.0, f"Flat or shrinking headcount ({g:.0%})."
-    comps.append(Component("timing", "headcount_growth", "Headcount growth", _r(pts), _r(mx), why,
-                           [{"field": "employee_growth_12m", "value": g}]))
+    comps.append(
+        Component(
+            "timing",
+            "headcount_growth",
+            "Headcount growth",
+            _r(pts),
+            _r(mx),
+            why,
+            [{"field": "employee_growth_12m", "value": g}],
+        )
+    )
     return comps
 
 
-def _score_engagement(icp: ICPDefinition, signals: list[SignalFact], e: EngagementFacts, now: datetime,
-                      budget: float) -> list[Component]:
+def _score_engagement(
+    icp: ICPDefinition, signals: list[SignalFact], e: EngagementFacts, now: datetime, budget: float
+) -> list[Component]:
     mx = budget * ENGAGEMENT_SALES_SHARE
     if e.meetings_90d > 0:
         ratio, why = 1.0, f"{e.meetings_90d} meeting(s) in the last 90 days."
@@ -283,8 +358,7 @@ def _score_engagement(icp: ICPDefinition, signals: list[SignalFact], e: Engageme
         ratio, why = 0.5, f"{e.replies_90d} repl(ies) in the last 90 days (not yet positive)."
     else:
         ratio, why = 0.0, "No two-way sales engagement in the last 90 days."
-    comps = [Component("engagement", "sales_engagement", "Sales engagement", _r(mx * ratio), _r(mx), why,
-                       [asdict(e)])]
+    comps = [Component("engagement", "sales_engagement", "Sales engagement", _r(mx * ratio), _r(mx), why, [asdict(e)])]
     comps.extend(_signal_components(icp, "engagement", signals, now))
     return comps
 
@@ -302,13 +376,13 @@ def _exclusion(icp: ICPDefinition, a: AccountFacts) -> str | None:
     if a.domain and a.domain.lower() in {d.lower() for d in icp.excluded_domains}:
         return f"Domain '{a.domain}' is on the do-not-target list."
     if a.employee_count is not None and a.employee_count < icp.size.hard_min_employees:
-        return (f"{a.employee_count} employees is below the hard minimum of "
-                f"{icp.size.hard_min_employees}.")
+        return f"{a.employee_count} employees is below the hard minimum of {icp.size.hard_min_employees}."
     return None
 
 
-def compute_inputs_hash(icp: ICPDefinition, a: AccountFacts, signals: list[SignalFact],
-                        e: EngagementFacts, now: datetime) -> str:
+def compute_inputs_hash(
+    icp: ICPDefinition, a: AccountFacts, signals: list[SignalFact], e: EngagementFacts, now: datetime
+) -> str:
     payload = {
         "icp": icp.model_dump(mode="json"),
         "account": asdict(a),
@@ -326,10 +400,7 @@ def _summary(result_cats: dict[str, CategoryScore], total: int) -> str:
     comps = [c for cat in result_cats.values() for c in cat.components if c.points > 0]
     comps.sort(key=lambda c: (-c.points / max(c.max_points, 0.01) * c.points, c.key))
     top = [c.label.lower() for c in comps[:3]]
-    gaps = [
-        cat.category for cat in result_cats.values()
-        if cat.max_points > 0 and cat.points / cat.max_points < 0.35
-    ]
+    gaps = [cat.category for cat in result_cats.values() if cat.max_points > 0 and cat.points / cat.max_points < 0.35]
     parts = [f"Scores {total}/100"]
     if top:
         parts.append("driven by " + ", ".join(top))
@@ -374,10 +445,9 @@ def score_account(
     if reason:
         return ScoreResult(0, "X", True, reason, categories, f"Excluded: {reason}", inputs_hash)
 
-    total = int(round(sum(c.points for c in categories.values())))
+    total = round(sum(c.points for c in categories.values()))
     total = max(0, min(100, total))
-    return ScoreResult(total, grade_for(total), False, None, categories,
-                       _summary(categories, total), inputs_hash)
+    return ScoreResult(total, grade_for(total), False, None, categories, _summary(categories, total), inputs_hash)
 
 
 def intent_index(result: ScoreResult) -> int:
@@ -385,4 +455,4 @@ def intent_index(result: ScoreResult) -> int:
     keys = ("intent", "timing", "engagement")
     got = sum(result.categories[k].points for k in keys)
     mx = sum(result.categories[k].max_points for k in keys)
-    return int(round(100 * got / mx)) if mx else 0
+    return round(100 * got / mx) if mx else 0

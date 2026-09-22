@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from gtmos.domain.enrichment import ExistingValue, FieldValue, ProviderError, decide, run_waterfall, Attempt
+from gtmos.domain.enrichment import Attempt, ExistingValue, FieldValue, ProviderError, decide, run_waterfall
 
 NOW = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -30,10 +30,14 @@ WATERFALL = {"employee_count": ["a", "b", "c"], "industry": ["a", "b"], "technol
 def test_waterfall_falls_back_on_miss_error_and_low_confidence():
     a = FakeProvider("a", {"industry": FieldValue("AI/ML Platforms", 0.9)}, ["employee_count", "industry"], fail=True)
     b = FakeProvider("b", {"employee_count": FieldValue(800, 0.4)}, ["employee_count", "industry", "technologies"])
-    c = FakeProvider("c", {"employee_count": FieldValue(850, 0.85), "technologies": FieldValue(["OpenAI"], 0.8)},
-                     ["employee_count", "technologies"])
-    res = run_waterfall("k.example", ["employee_count", "industry", "technologies"], WATERFALL,
-                        {"a": a, "b": b, "c": c}, {}, NOW)
+    c = FakeProvider(
+        "c",
+        {"employee_count": FieldValue(850, 0.85), "technologies": FieldValue(["OpenAI"], 0.8)},
+        ["employee_count", "technologies"],
+    )
+    res = run_waterfall(
+        "k.example", ["employee_count", "industry", "technologies"], WATERFALL, {"a": a, "b": b, "c": c}, {}, NOW
+    )
     outcomes = [(x.field, x.provider, x.outcome) for x in res.attempts]
     assert ("employee_count", "a", "error") in outcomes
     assert ("employee_count", "b", "low_confidence") in outcomes

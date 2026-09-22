@@ -60,11 +60,15 @@ NOW = datetime(2026, 9, 1, tzinfo=UTC)
 
 def test_attribution_models_distribute_credit_differently():
     opp = OpportunityFacts("o1", 100_000, NOW, won=True)
-    touches = {"o1": [Touch("webinar", NOW - timedelta(days=60), "t1"),
-                      Touch("funding-outbound", NOW - timedelta(days=20), "t2"),
-                      Touch("pql", NOW - timedelta(days=2), "t3"),
-                      Touch("too-old", NOW - timedelta(days=400), "t0"),
-                      Touch("after-open", NOW + timedelta(days=1), "t4")]}
+    touches = {
+        "o1": [
+            Touch("webinar", NOW - timedelta(days=60), "t1"),
+            Touch("funding-outbound", NOW - timedelta(days=20), "t2"),
+            Touch("pql", NOW - timedelta(days=2), "t3"),
+            Touch("too-old", NOW - timedelta(days=400), "t0"),
+            Touch("after-open", NOW + timedelta(days=1), "t4"),
+        ]
+    }
     ft = attribute("first_touch", [opp], touches)
     lt = attribute("last_touch", [opp], touches)
     lin = attribute("linear", [opp], touches)

@@ -197,12 +197,8 @@ class Opportunity(IdMixin, TimestampMixin, Base):
     expected_close_date: Mapped[date | None] = mapped_column(Date)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    primary_contact_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("contacts.id", ondelete="SET NULL")
-    )
-    source_campaign_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("campaigns.id", ondelete="SET NULL")
-    )
+    primary_contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    source_campaign_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("campaigns.id", ondelete="SET NULL"))
     lead_source: Mapped[str | None] = mapped_column(String(60))  # outbound | inbound | plg | partner
     lost_reason: Mapped[str | None] = mapped_column(String(200))
     data_origin: Mapped[str] = mapped_column(String(10), default="demo")
@@ -227,12 +223,8 @@ class Activity(IdMixin, Base):
     channel: Mapped[str | None] = mapped_column(String(20))  # email | linkedin | phone | meeting | web
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     campaign_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("campaigns.id", ondelete="SET NULL"))
-    sequence_step_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("sequence_steps.id", ondelete="SET NULL")
-    )
-    message_draft_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("message_drafts.id", ondelete="SET NULL")
-    )
+    sequence_step_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sequence_steps.id", ondelete="SET NULL"))
+    message_draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("message_drafts.id", ondelete="SET NULL"))
     subject: Mapped[str | None] = mapped_column(String(500))
     summary: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(String(20))  # tasks: open | done

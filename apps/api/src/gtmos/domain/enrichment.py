@@ -99,34 +99,75 @@ STALE_AFTER = timedelta(days=180)
 UPGRADE_MARGIN = 0.1
 
 
-def decide(field_name: str, existing: ExistingValue | None, candidate: Attempt | None,
-           now: datetime) -> FieldDecision:
+def decide(field_name: str, existing: ExistingValue | None, candidate: Attempt | None, now: datetime) -> FieldDecision:
     """Merge policy: never overwrite manual locks; only replace data with clearly better data."""
     if candidate is None or candidate.value is None:
         if existing is not None and existing.value is not None:
-            return FieldDecision(field_name, "keep_existing", existing.value, existing.confidence,
-                                 existing.source, "No provider returned a value; kept existing.")
+            return FieldDecision(
+                field_name,
+                "keep_existing",
+                existing.value,
+                existing.confidence,
+                existing.source,
+                "No provider returned a value; kept existing.",
+            )
         return FieldDecision(field_name, "no_data", None, None, None, "No provider returned a value.")
 
     conf = candidate.confidence or 0.0
     if existing is None or existing.value is None:
-        return FieldDecision(field_name, "set", candidate.value, conf, candidate.provider,
-                             f"Filled empty field from {candidate.provider} ({conf:.2f}).")
+        return FieldDecision(
+            field_name,
+            "set",
+            candidate.value,
+            conf,
+            candidate.provider,
+            f"Filled empty field from {candidate.provider} ({conf:.2f}).",
+        )
     if existing.is_manual_lock:
-        return FieldDecision(field_name, "keep_existing", existing.value, existing.confidence,
-                             existing.source, "Field is manually locked; provider value ignored.")
+        return FieldDecision(
+            field_name,
+            "keep_existing",
+            existing.value,
+            existing.confidence,
+            existing.source,
+            "Field is manually locked; provider value ignored.",
+        )
     if existing.value == candidate.value:
-        return FieldDecision(field_name, "keep_existing", existing.value, max(existing.confidence, conf),
-                             existing.source, "Provider confirmed the existing value.")
+        return FieldDecision(
+            field_name,
+            "keep_existing",
+            existing.value,
+            max(existing.confidence, conf),
+            existing.source,
+            "Provider confirmed the existing value.",
+        )
     stale = existing.observed_at is None or now - existing.observed_at > STALE_AFTER
     if conf >= existing.confidence + UPGRADE_MARGIN:
-        return FieldDecision(field_name, "update", candidate.value, conf, candidate.provider,
-                             f"Higher confidence ({conf:.2f} vs {existing.confidence:.2f}).")
+        return FieldDecision(
+            field_name,
+            "update",
+            candidate.value,
+            conf,
+            candidate.provider,
+            f"Higher confidence ({conf:.2f} vs {existing.confidence:.2f}).",
+        )
     if stale and conf >= existing.confidence:
-        return FieldDecision(field_name, "update", candidate.value, conf, candidate.provider,
-                             "Existing value is stale (>180 days) and provider is at least as confident.")
-    return FieldDecision(field_name, "keep_existing", existing.value, existing.confidence, existing.source,
-                         f"Provider value {candidate.value!r} not confident enough to replace existing.")
+        return FieldDecision(
+            field_name,
+            "update",
+            candidate.value,
+            conf,
+            candidate.provider,
+            "Existing value is stale (>180 days) and provider is at least as confident.",
+        )
+    return FieldDecision(
+        field_name,
+        "keep_existing",
+        existing.value,
+        existing.confidence,
+        existing.source,
+        f"Provider value {candidate.value!r} not confident enough to replace existing.",
+    )
 
 
 def run_waterfall(
@@ -160,12 +201,16 @@ def run_waterfall(
         for provider_key, wanted in batch.items():
             provider = providers.get(provider_key)
             if provider is None:
-                attempts.extend(Attempt(f, provider_key, position, "skipped", error="provider not configured")
-                                for f in wanted)
+                attempts.extend(
+                    Attempt(f, provider_key, position, "skipped", error="provider not configured") for f in wanted
+                )
                 continue
             supported = [f for f in wanted if f in provider.supported_fields]
-            attempts.extend(Attempt(f, provider_key, position, "skipped", error="field not supported")
-                            for f in wanted if f not in provider.supported_fields)
+            attempts.extend(
+                Attempt(f, provider_key, position, "skipped", error="field not supported")
+                for f in wanted
+                if f not in provider.supported_fields
+            )
             if not supported:
                 continue
             first_call = provider_key not in responses
@@ -178,7 +223,10 @@ def run_waterfall(
                     responses[provider_key] = provider.lookup(domain, request)
                 except ProviderError as exc:
                     responses[provider_key] = exc
-                latencies[provider_key] = int((clock() - start) * 1000)
+                measured = int((clock() - start) * 1000)
+                # Simulated providers report the latency they would have had instead of sleeping.
+                reported = getattr(provider, "last_latency_ms", None)
+                latencies[provider_key] = reported if isinstance(reported, int) and reported else measured
                 cost += provider.cost_per_lookup
                 called.append(provider_key)
             resp = responses[provider_key]
@@ -187,17 +235,18 @@ def run_waterfall(
                 charge = call_cost if i == 0 else 0.0
                 lat = latencies.get(provider_key, 0) if i == 0 else 0
                 if isinstance(resp, ProviderError):
-                    attempts.append(Attempt(f, provider_key, position, "error", latency_ms=lat,
-                                            cost_credits=charge, error=str(resp)))
+                    attempts.append(
+                        Attempt(
+                            f, provider_key, position, "error", latency_ms=lat, cost_credits=charge, error=str(resp)
+                        )
+                    )
                     continue
                 fv = resp.get(f)
                 if fv is None or fv.value is None or fv.value == "" or fv.value == []:
-                    attempts.append(Attempt(f, provider_key, position, "miss", latency_ms=lat,
-                                            cost_credits=charge))
+                    attempts.append(Attempt(f, provider_key, position, "miss", latency_ms=lat, cost_credits=charge))
                     continue
                 if fv.confidence < min_confidence:
-                    att = Attempt(f, provider_key, position, "low_confidence", fv.value, fv.confidence,
-                                  lat, charge)
+                    att = Attempt(f, provider_key, position, "low_confidence", fv.value, fv.confidence, lat, charge)
                     attempts.append(att)
                     if f not in fallback or (fallback[f].confidence or 0) < fv.confidence:
                         fallback[f] = att
@@ -206,7 +255,5 @@ def run_waterfall(
                 attempts.append(att)
                 resolved[f] = att
 
-    decisions = [
-        decide(f, existing.get(f), resolved.get(f) or fallback.get(f), now) for f in fields
-    ]
+    decisions = [decide(f, existing.get(f), resolved.get(f) or fallback.get(f), now) for f in fields]
     return WaterfallResult(attempts, decisions, round(cost, 4), called)

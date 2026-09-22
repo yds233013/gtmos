@@ -63,15 +63,19 @@ def weights_for(model: str, n: int) -> list[float]:
     raise ValueError(f"unknown attribution model '{model}'")
 
 
-def eligible_touches(touches: list[Touch], opened_at: datetime,
-                     lookback: timedelta = DEFAULT_LOOKBACK) -> list[Touch]:
+def eligible_touches(touches: list[Touch], opened_at: datetime, lookback: timedelta = DEFAULT_LOOKBACK) -> list[Touch]:
     window_start = opened_at - lookback
-    return sorted((t for t in touches if window_start <= t.occurred_at <= opened_at),
-                  key=lambda t: (t.occurred_at, t.touch_id))
+    return sorted(
+        (t for t in touches if window_start <= t.occurred_at <= opened_at), key=lambda t: (t.occurred_at, t.touch_id)
+    )
 
 
-def attribute(model: str, opps: list[OpportunityFacts], touches_by_opp: dict[str, list[Touch]],
-              lookback: timedelta = DEFAULT_LOOKBACK) -> AttributionResult:
+def attribute(
+    model: str,
+    opps: list[OpportunityFacts],
+    touches_by_opp: dict[str, list[Touch]],
+    lookback: timedelta = DEFAULT_LOOKBACK,
+) -> AttributionResult:
     pipeline: dict[str, float] = defaultdict(float)
     won: dict[str, float] = defaultdict(float)
     counts: dict[str, float] = defaultdict(float)

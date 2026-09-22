@@ -34,16 +34,25 @@ ROLE_TITLE_RULES: dict[str, list[tuple[str, float, str]]] = {
         (r"\bhead of (engineering|platform)\b", 40, "Engineering head often owns budget at mid-size companies"),
     ],
     "champion": [
-        (r"\bhead of (ai|ml|machine learning|applied ai|ai platform|genai)\b", 60,
-         "Head of AI/ML feels agent reliability pain most directly"),
-        (r"\bdirector\b.*\b(ai|ml|machine learning|ai infrastructure|ml platform)\b", 55,
-         "AI/ML director drives tooling decisions for their org"),
+        (
+            r"\bhead of (ai|ml|machine learning|applied ai|ai platform|genai)\b",
+            60,
+            "Head of AI/ML feels agent reliability pain most directly",
+        ),
+        (
+            r"\bdirector\b.*\b(ai|ml|machine learning|ai infrastructure|ml platform)\b",
+            55,
+            "AI/ML director drives tooling decisions for their org",
+        ),
         (r"\b(ml|ai) platform (lead|manager)\b", 45, "Platform lead owns the internal AI stack"),
         (r"\bvp\b.*\b(ai|ml)\b", 30, "Senior AI leader who can champion internally"),
     ],
     "technical_evaluator": [
-        (r"\b(staff|principal|senior staff)\b.*\b(ml|ai|machine learning|platform)\b", 60,
-         "Staff-level engineer runs technical evaluations"),
+        (
+            r"\b(staff|principal|senior staff)\b.*\b(ml|ai|machine learning|platform)\b",
+            60,
+            "Staff-level engineer runs technical evaluations",
+        ),
         (r"\b(ml|ai) platform (lead|engineer)\b", 50, "Owns the platform the product would integrate with"),
         (r"\b(ml|machine learning|ai) (infrastructure|infra)\b", 45, "AI infrastructure owner"),
         (r"\barchitect\b", 40, "Architect evaluates integration fit"),
@@ -185,8 +194,12 @@ def infer_committee(
         pick = next((c for c in cands if c.contact_id not in taken), None)
         if pick is None and cands:
             pick = cands[0]  # allow double duty only when nobody else qualifies
-            pick = RoleCandidate(pick.contact_id, pick.role, pick.score,
-                                 [*pick.reasons, "Also holds another role: no other qualified candidate"])
+            pick = RoleCandidate(
+                pick.contact_id,
+                pick.role,
+                pick.score,
+                [*pick.reasons, "Also holds another role: no other qualified candidate"],
+            )
         if pick:
             primary[role] = pick
             taken.add(pick.contact_id)
@@ -198,20 +211,19 @@ def infer_committee(
         if role in overrides:
             cid = overrides[role]
             auto = next((c for c in cands if c.contact_id == cid), None)
-            reasons = ["Manually assigned by a rep; overrides inferred ranking",
-                       *(auto.reasons if auto else [])]
+            reasons = ["Manually assigned by a rep; overrides inferred ranking", *(auto.reasons if auto else [])]
             assignments.append(RoleAssignment(role, cid, 1, auto.score if auto else 0.0, 1.0, reasons, True))
             others = [c for c in cands if c.contact_id != cid]
         elif role in primary:
             p = primary[role]
             runner = next((c.score for c in cands if c.contact_id != p.contact_id), None)
-            assignments.append(RoleAssignment(role, p.contact_id, 1, p.score, _confidence(p.score, runner),
-                                              p.reasons))
+            assignments.append(RoleAssignment(role, p.contact_id, 1, p.score, _confidence(p.score, runner), p.reasons))
             others = [c for c in cands if c.contact_id != p.contact_id]
         else:
             unfilled.append(role)
             continue
         for i, c in enumerate(others[:2], start=2):
-            assignments.append(RoleAssignment(role, c.contact_id, i, c.score, _confidence(c.score, None) * 0.8,
-                                              c.reasons))
+            assignments.append(
+                RoleAssignment(role, c.contact_id, i, c.score, _confidence(c.score, None) * 0.8, c.reasons)
+            )
     return CommitteeResult(assignments, unfilled, by_role)

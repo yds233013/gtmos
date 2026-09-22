@@ -1,5 +1,5 @@
-from gtmos.domain.rules import Condition
 from gtmos.domain.routing import RuleSpec, UserFacts, pick_least_loaded, route
+from gtmos.domain.rules import Condition
 
 C = Condition
 USERS = [
@@ -12,19 +12,45 @@ USERS = [
     UserFacts("gone", "Former Rep", "Enterprise NA", False, 40, 0),
 ]
 RULES = [
-    RuleSpec("existing-customer", "Existing customer → AM", 10, (C(field="account.is_customer", op="eq", value=True),),
-             "pool_least_loaded", assign_team="Account Management", overrides_existing_owner=True),
-    RuleSpec("strategic-high-intent", "High-intent strategic → Senior AE", 20,
-             (C(field="account.segment", op="in", value=["strategic", "enterprise"]),
-              C(field="account.intent_score", op="gte", value=70)),
-             "user", assign_user_id="sae"),
-    RuleSpec("enterprise-na", "Enterprise NA → AE", 30,
-             (C(field="account.segment", op="in", value=["strategic", "enterprise"]),
-              C(field="account.region", op="eq", value="NA")),
-             "pool_least_loaded", assign_team="Enterprise NA"),
-    RuleSpec("smb", "SMB & mid-market → SDR pool", 50,
-             (C(field="account.segment", op="in", value=["smb", "mid_market"]),), "pool_least_loaded",
-             assign_team="SDR Pool"),
+    RuleSpec(
+        "existing-customer",
+        "Existing customer → AM",
+        10,
+        (C(field="account.is_customer", op="eq", value=True),),
+        "pool_least_loaded",
+        assign_team="Account Management",
+        overrides_existing_owner=True,
+    ),
+    RuleSpec(
+        "strategic-high-intent",
+        "High-intent strategic → Senior AE",
+        20,
+        (
+            C(field="account.segment", op="in", value=["strategic", "enterprise"]),
+            C(field="account.intent_score", op="gte", value=70),
+        ),
+        "user",
+        assign_user_id="sae",
+    ),
+    RuleSpec(
+        "enterprise-na",
+        "Enterprise NA → AE",
+        30,
+        (
+            C(field="account.segment", op="in", value=["strategic", "enterprise"]),
+            C(field="account.region", op="eq", value="NA"),
+        ),
+        "pool_least_loaded",
+        assign_team="Enterprise NA",
+    ),
+    RuleSpec(
+        "smb",
+        "SMB & mid-market → SDR pool",
+        50,
+        (C(field="account.segment", op="in", value=["smb", "mid_market"]),),
+        "pool_least_loaded",
+        assign_team="SDR Pool",
+    ),
 ]
 
 
@@ -51,9 +77,14 @@ def test_high_intent_strategic_beats_territory_rule_and_records_conflict():
 def test_same_priority_tie_broken_by_specificity_then_key():
     r1 = RuleSpec("b-rule", "B", 5, (C(field="account.region", op="eq", value="NA"),), "user", assign_user_id="ae1")
     r2 = RuleSpec("a-rule", "A", 5, (C(field="account.region", op="eq", value="NA"),), "user", assign_user_id="ae2")
-    r3 = RuleSpec("z-specific", "Z", 5, (C(field="account.region", op="eq", value="NA"),
-                                         C(field="account.segment", op="eq", value="enterprise")),
-                  "user", assign_user_id="sae")
+    r3 = RuleSpec(
+        "z-specific",
+        "Z",
+        5,
+        (C(field="account.region", op="eq", value="NA"), C(field="account.segment", op="eq", value="enterprise")),
+        "user",
+        assign_user_id="sae",
+    )
     out = route([r1, r2], ctx(), USERS)
     assert out.rule_key == "a-rule"
     assert "tie broken by key" in out.conflicts[0]["lost_because"]

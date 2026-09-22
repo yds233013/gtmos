@@ -63,9 +63,7 @@ class MessageDraft(IdMixin, TimestampMixin, Base):
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
     contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
     campaign_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("campaigns.id", ondelete="SET NULL"))
-    research_report_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("research_reports.id", ondelete="SET NULL")
-    )
+    research_report_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("research_reports.id", ondelete="SET NULL"))
     channel: Mapped[str] = mapped_column(String(20))  # email | linkedin | call_prep
     subject: Mapped[str | None] = mapped_column(String(500))
     body: Mapped[str] = mapped_column(Text)
@@ -132,9 +130,7 @@ class ExperimentOutcome(IdMixin, Base):
     __tablename__ = "experiment_outcomes"
     __table_args__ = (UniqueConstraint("assignment_id", "metric"),)
 
-    assignment_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("experiment_assignments.id", ondelete="CASCADE")
-    )
+    assignment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("experiment_assignments.id", ondelete="CASCADE"))
     metric: Mapped[str] = mapped_column(String(40))
     value: Mapped[float] = mapped_column(Float, default=1.0)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

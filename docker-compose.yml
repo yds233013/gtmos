@@ -1,0 +1,96 @@
+# GTMOS local stack. `make up` starts everything; `make dev-deps` starts only Postgres + Redis.
+name: gtmos
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gtmos
+      POSTGRES_PASSWORD: gtmos
+      POSTGRES_DB: gtmos
+    ports:
+      - "${GTMOS_DB_PORT:-56432}:5432"   # uncommon host port avoids clashing with other local databases
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gtmos -d gtmos"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${GTMOS_REDIS_PORT:-56379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./apps/api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://gtmos:gtmos@db:5432/gtmos
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+      CORS_ORIGINS: '["http://localhost:3010","http://127.0.0.1:3010"]'
+    command: ["sh", "-c", "alembic upgrade head && python -m gtmos.seed --if-empty && uvicorn gtmos.main:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "${GTMOS_API_PORT:-8010}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  worker:
+    build:
+      context: ./apps/api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://gtmos:gtmos@db:5432/gtmos
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+    command: ["python", "-m", "gtmos.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    ports:
+      - "${GTMOS_WEB_PORT:-3010}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional: local n8n for importing the templates in integrations/n8n. `make n8n`.
+  n8n:
+    image: n8nio/n8n:latest
+    profiles: ["n8n"]
+    ports:
+      - "5678:5678"
+    environment:
+      GTMOS_BASE_URL: http://api:8000
+    volumes:
+      - n8ndata:/home/node/.n8n
+
+volumes:
+  pgdata:
+  n8ndata:

@@ -61,8 +61,7 @@ def _lost_because(winner: RuleSpec, loser: RuleSpec) -> str:
     if loser.priority != winner.priority:
         return f"lower priority ({loser.priority} vs {winner.priority})"
     if len(loser.conditions) != len(winner.conditions):
-        return (f"same priority, less specific ({len(loser.conditions)} vs "
-                f"{len(winner.conditions)} conditions)")
+        return f"same priority, less specific ({len(loser.conditions)} vs {len(winner.conditions)} conditions)"
     return f"same priority and specificity; tie broken by key ('{winner.key}' < '{loser.key}')"
 
 
@@ -76,8 +75,9 @@ def pick_least_loaded(users: list[UserFacts], team: str | None) -> tuple[UserFac
         available = pool
         note = " All members are at capacity; assigned to the least loaded anyway (capacity alert)."
     chosen = min(available, key=lambda u: (u.load / max(u.capacity, 1), u.name, u.id))
-    return chosen, (f"Least-loaded member of {team}: {chosen.name} "
-                    f"({chosen.load}/{chosen.capacity} open accounts).{note}")
+    return chosen, (
+        f"Least-loaded member of {team}: {chosen.name} ({chosen.load}/{chosen.capacity} open accounts).{note}"
+    )
 
 
 def route(
@@ -92,30 +92,34 @@ def route(
         if ok:
             matched.append((r, results))
 
-    matched_view = [{"rule": r.key, "name": r.name, "priority": r.priority, "conditions": res}
-                    for r, res in matched]
+    matched_view = [{"rule": r.key, "name": r.name, "priority": r.priority, "conditions": res} for r, res in matched]
     if not matched:
-        return RoutingOutcome("unmatched", None, None, [], [],
-                              ["No routing rule matched. Account goes to the RevOps triage queue."])
+        return RoutingOutcome(
+            "unmatched", None, None, [], [], ["No routing rule matched. Account goes to the RevOps triage queue."]
+        )
 
     winner, _ = matched[0]
-    explanation = [f"Matched rule '{winner.name}' (priority {winner.priority}): "
-                   + "; ".join(c.describe() for c in winner.conditions)]
+    explanation = [
+        f"Matched rule '{winner.name}' (priority {winner.priority}): "
+        + "; ".join(c.describe() for c in winner.conditions)
+    ]
     conflicts: list[dict[str, Any]] = []
     for loser, _ in matched[1:]:
-        entry = {"rule": loser.key, "name": loser.name, "destination": loser.destination,
-                 "lost_because": _lost_because(winner, loser)}
+        entry = {
+            "rule": loser.key,
+            "name": loser.name,
+            "destination": loser.destination,
+            "lost_because": _lost_because(winner, loser),
+        }
         if loser.destination != winner.destination:
             entry["is_conflict"] = True
             conflicts.append(entry)
-            explanation.append(f"Also matched '{loser.name}' → {loser.destination}; lost: "
-                               f"{entry['lost_because']}.")
+            explanation.append(f"Also matched '{loser.name}' → {loser.destination}; lost: {entry['lost_because']}.")
 
     owner_id = ctx.get("account", {}).get("owner_id")
     owner = users_by_id.get(owner_id) if owner_id else None
     if owner and owner.is_active and not winner.overrides_existing_owner:
-        explanation.append(f"Kept existing owner {owner.name}: ownership is respected unless the rule "
-                           f"overrides it.")
+        explanation.append(f"Kept existing owner {owner.name}: ownership is respected unless the rule overrides it.")
         return RoutingOutcome("kept_owner", winner.key, owner.id, matched_view, conflicts, explanation)
     if owner and not owner.is_active:
         explanation.append(f"Previous owner {owner.name} is inactive; reassigning.")

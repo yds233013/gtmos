@@ -102,7 +102,9 @@ class ComparisonResult:
     diff_ci_high: float
     z: float
     p_value: float
-    verdict: str  # insufficient_sample | insufficient_events | no_significant_difference | treatment_better | control_better
+    verdict: (
+        str  # insufficient_sample | insufficient_events | no_significant_difference | treatment_better | control_better
+    )
     explanation: str
     required_n_per_variant: int | None
 
@@ -118,13 +120,19 @@ def required_sample_size(p_base: float, mde_abs: float, power_z: float = 0.8416,
         return 0
     p2 = min(p_base + mde_abs, 0.999)
     p_bar = (p_base + p2) / 2
-    num = (alpha_z * math.sqrt(2 * p_bar * (1 - p_bar))
-           + power_z * math.sqrt(p_base * (1 - p_base) + p2 * (1 - p2))) ** 2
-    return math.ceil(num / (mde_abs ** 2))
+    num = (
+        alpha_z * math.sqrt(2 * p_bar * (1 - p_bar)) + power_z * math.sqrt(p_base * (1 - p_base) + p2 * (1 - p2))
+    ) ** 2
+    return math.ceil(num / (mde_abs**2))
 
 
-def compare(control: tuple[str, int, int], treatment: tuple[str, int, int], min_sample: int,
-            alpha: float = 0.05, min_events: int = 5) -> ComparisonResult:
+def compare(
+    control: tuple[str, int, int],
+    treatment: tuple[str, int, int],
+    min_sample: int,
+    alpha: float = 0.05,
+    min_events: int = 5,
+) -> ComparisonResult:
     """control/treatment: (key, successes, n)."""
     c = variant_stats(control[0], control[1], control[2])
     t = variant_stats(treatment[0], treatment[1], treatment[2])
@@ -136,20 +144,20 @@ def compare(control: tuple[str, int, int], treatment: tuple[str, int, int], min_
 
     if min(c.n, t.n) < min_sample:
         verdict = "insufficient_sample"
-        why = (f"Only {min(c.n, t.n)} units in the smaller arm; the pre-registered minimum is {min_sample}. "
-               "No winner is declared.")
+        why = (
+            f"Only {min(c.n, t.n)} units in the smaller arm; the pre-registered minimum is {min_sample}. "
+            "No winner is declared."
+        )
     elif min(c.successes, t.successes, c.n - c.successes, t.n - t.successes) < min_events:
         verdict = "insufficient_events"
         why = f"Fewer than {min_events} events in an arm; the normal approximation is unreliable."
     elif p >= alpha or lo <= 0 <= hi:
         verdict = "no_significant_difference"
-        why = (f"p = {p:.3f}; the 95% CI for the difference ({lo:+.1%} to {hi:+.1%}) includes zero. "
-               "We cannot reject H0.")
+        why = f"p = {p:.3f}; the 95% CI for the difference ({lo:+.1%} to {hi:+.1%}) includes zero. We cannot reject H0."
     elif abs_lift > 0:
         verdict = "treatment_better"
-        why = (f"Treatment beats control by {abs_lift:+.1%} (95% CI {lo:+.1%} to {hi:+.1%}, p = {p:.3f}). "
-               "Reject H0.")
+        why = f"Treatment beats control by {abs_lift:+.1%} (95% CI {lo:+.1%} to {hi:+.1%}, p = {p:.3f}). Reject H0."
     else:
         verdict = "control_better"
-        why = (f"Control beats treatment by {-abs_lift:.1%} (95% CI {lo:+.1%} to {hi:+.1%}, p = {p:.3f}).")
+        why = f"Control beats treatment by {-abs_lift:.1%} (95% CI {lo:+.1%} to {hi:+.1%}, p = {p:.3f})."
     return ComparisonResult(c, t, abs_lift, rel, lo, hi, z, p, verdict, why, req)

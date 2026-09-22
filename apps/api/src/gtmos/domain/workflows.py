@@ -83,9 +83,12 @@ DEFAULT_WORKFLOWS: list[dict[str, Any]] = [
             "evidence-grounded research, draft outreach into the approval queue, route and sync to CRM."
         ),
         "definition": {
-            "trigger": {"type": "signal.created",
-                        "filters": [{"field": "signal.signal_type", "op": "in",
-                                     "value": ["funding_round", "ai_product_launch"]}]},
+            "trigger": {
+                "type": "signal.created",
+                "filters": [
+                    {"field": "signal.signal_type", "op": "in", "value": ["funding_round", "ai_product_launch"]}
+                ],
+            },
             "conditions": [
                 {"field": "account.icp_score", "op": "gte", "value": 75},
                 {"field": "account.is_customer", "op": "eq", "value": False},
@@ -116,8 +119,7 @@ DEFAULT_WORKFLOWS: list[dict[str, Any]] = [
             "steps": [
                 {"key": "rescore", "action": "recalculate_score"},
                 {"key": "route", "action": "route_account"},
-                {"key": "task", "action": "create_task",
-                 "params": {"subject": "PQL: reach out within 1 business day"}},
+                {"key": "task", "action": "create_task", "params": {"subject": "PQL: reach out within 1 business day"}},
                 {"key": "lifecycle", "action": "update_lifecycle", "params": {"stage": "engaged"}},
                 {"key": "notify", "action": "notify_owner"},
                 {"key": "crm", "action": "sync_crm", "max_attempts": 4},
@@ -129,8 +131,10 @@ DEFAULT_WORKFLOWS: list[dict[str, Any]] = [
         "name": "AI hiring surge → enrich & rescore",
         "description": "Re-enrich and rescore accounts whose AI team is scaling quickly.",
         "definition": {
-            "trigger": {"type": "signal.created",
-                        "filters": [{"field": "signal.signal_type", "op": "eq", "value": "ai_hiring_surge"}]},
+            "trigger": {
+                "type": "signal.created",
+                "filters": [{"field": "signal.signal_type", "op": "eq", "value": "ai_hiring_surge"}],
+            },
             "conditions": [{"field": "account.score_grade", "op": "in", "value": ["A", "B", "C"]}],
             "steps": [
                 {"key": "enrich", "action": "enrich_account"},
@@ -144,13 +148,18 @@ DEFAULT_WORKFLOWS: list[dict[str, Any]] = [
         "name": "Score crosses 80 → route to owner",
         "description": "When an account becomes A-grade, make sure it has an owner and a task.",
         "definition": {
-            "trigger": {"type": "score.threshold_crossed",
-                        "filters": [{"field": "event.threshold", "op": "eq", "value": 80}]},
+            "trigger": {
+                "type": "score.threshold_crossed",
+                "filters": [{"field": "event.threshold", "op": "eq", "value": 80}],
+            },
             "conditions": [],
             "steps": [
                 {"key": "route", "action": "route_account"},
-                {"key": "task", "action": "create_task",
-                 "params": {"subject": "Newly A-grade account: review research and committee"}},
+                {
+                    "key": "task",
+                    "action": "create_task",
+                    "params": {"subject": "Newly A-grade account: review research and committee"},
+                },
                 {"key": "crm", "action": "sync_crm"},
             ],
         },

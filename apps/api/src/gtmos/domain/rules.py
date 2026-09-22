@@ -13,8 +13,17 @@ from pydantic import BaseModel
 Op = Literal["eq", "neq", "in", "not_in", "gte", "lte", "gt", "lt", "exists", "not_exists", "contains"]
 
 OP_LABELS = {
-    "eq": "=", "neq": "≠", "in": "in", "not_in": "not in", "gte": "≥", "lte": "≤", "gt": ">", "lt": "<",
-    "exists": "is set", "not_exists": "is not set", "contains": "contains",
+    "eq": "=",
+    "neq": "≠",
+    "in": "in",
+    "not_in": "not in",
+    "gte": "≥",
+    "lte": "≤",
+    "gt": ">",
+    "lt": "<",
+    "exists": "is set",
+    "not_exists": "is not set",
+    "contains": "contains",
 }
 
 
@@ -81,6 +90,14 @@ def evaluate_all(conds: list[Condition], ctx: dict[str, Any]) -> tuple[bool, lis
     for c in conds:
         ok, actual = evaluate(c, ctx)
         all_ok = all_ok and ok
-        results.append({"condition": c.describe(), "field": c.field, "op": c.op, "expected": c.value,
-                        "actual": actual, "passed": ok})
+        results.append(
+            {
+                "condition": c.describe(),
+                "field": c.field,
+                "op": c.op,
+                "expected": c.value,
+                "actual": actual,
+                "passed": ok,
+            }
+        )
     return all_ok, results
