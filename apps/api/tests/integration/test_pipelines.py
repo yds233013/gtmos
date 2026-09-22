@@ -313,17 +313,11 @@ def test_copilot_routes_to_approved_metrics_only(client):
         r = client.post("/api/v1/copilot/ask", json={"question": q}).json()
         assert r["intent"] == intent, q
         assert r["queries"] and r["answer"]
+    # An injection string used to be routed to whichever approved metric shared a word with it: safe,
+    # but it answered a command as though it were a question. It is now refused outright.
     evil = client.post("/api/v1/copilot/ask", json={"question": "DROP TABLE accounts; select * from users"}).json()
-    assert evil["generator"] == "deterministic" and evil["queries"][0]["metric"] in {
-        "stack_inspector",
-        "breakdown",
-        "period_comparison",
-        "funnel",
-        "signal_correlation",
-        "experiments",
-        "attribution",
-        "velocity",
-    }
+    assert evil["generator"] == "deterministic"
+    assert evil["intent"] == "refused" and evil["queries"] == []
 
 
 def test_stack_inspector_evidence_is_traceable(client):

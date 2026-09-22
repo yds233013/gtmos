@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from gtmos.config import get_settings
@@ -52,22 +52,55 @@ def execute_run_job(run_id: str) -> str:
         return result.status
 
 
-def sweep_stale_queued(max_age: timedelta = timedelta(minutes=2)) -> int:
-    """Re-enqueue runs stuck in `queued` (e.g. Redis was down when they were created)."""
-    from sqlalchemy import select
+# A run that is still `running` long after any real execution would have finished belongs to a worker
+# that died. Generous, because the bound must exceed the slowest legitimate run: re-enqueuing a run that
+# is merely slow is safe (the executor's row lock makes the second worker a no-op) but pointless.
+ABANDONED_AFTER = timedelta(minutes=30)
 
-    from gtmos.db import session_scope
+
+def stale_run_ids(
+    db: Any,
+    now: datetime,
+    max_age: timedelta = timedelta(minutes=2),
+    abandoned_after: timedelta = ABANDONED_AFTER,
+    limit: int = 100,
+) -> list[uuid.UUID]:
+    """Runs no worker is going to pick up.
+
+    Two ways that happens. A run stuck in `queued` was never enqueued at all — Redis was down when it
+    was created. A run stuck in `running` was claimed by a worker that then died: nothing re-enqueues
+    it, because the enqueue happened before the crash, so without this it sits half-executed forever.
+    Both are safe to re-enqueue: `execute_run` skips completed steps and takes a row lock, so a run
+    that is in fact still alive elsewhere is a no-op rather than a duplicate.
+
+    Separate from the sweeping so the selection can be tested against a session, rather than only
+    through a function that opens its own.
+    """
+    from sqlalchemy import or_, select
+
     from gtmos.models import WorkflowRun
+
+    return list(
+        db.scalars(
+            select(WorkflowRun.id)
+            .where(
+                or_(
+                    (WorkflowRun.status == "queued") & (WorkflowRun.created_at < now - max_age),
+                    (WorkflowRun.status == "running") & (WorkflowRun.started_at < now - abandoned_after),
+                )
+            )
+            .limit(limit)
+        )
+    )
+
+
+def sweep_stale_queued(max_age: timedelta = timedelta(minutes=2), abandoned_after: timedelta = ABANDONED_AFTER) -> int:
+    """Re-enqueue everything `stale_run_ids` finds."""
+    from gtmos.db import session_scope
     from gtmos.services.common import utcnow
 
     with session_scope() as db:
-        stale = list(
-            db.scalars(
-                select(WorkflowRun.id)
-                .where(WorkflowRun.status == "queued", WorkflowRun.created_at < utcnow() - max_age)
-                .limit(100)
-            )
-        )
+        stale = stale_run_ids(db, utcnow(), max_age, abandoned_after)
     for rid in stale:
         try:
             enqueue_run(str(rid))

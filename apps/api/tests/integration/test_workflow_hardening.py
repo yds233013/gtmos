@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 from collections import Counter
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -398,3 +399,44 @@ def test_a_step_failing_inside_its_savepoint_keeps_the_work_of_earlier_steps(db,
     assert kept is not None, "an earlier step's committed work must survive a later step's failure"
     assert rolled_back is None, "the failing step's own writes must roll back to its savepoint"
     assert _steps(db, run)["route"].status == "succeeded"
+
+
+def test_the_sweeper_recovers_a_run_abandoned_by_a_dead_worker(db, ws):
+    """A crashed worker leaves the run `running`; nothing re-enqueues it unless the sweeper looks.
+
+    The enqueue happened before the crash, so the queue has already forgotten the run. Only `queued`
+    used to be swept, which meant a run interrupted mid-flight stayed half-executed forever.
+    """
+    from gtmos.worker import stale_run_ids
+
+    wf = db.scalars(select(Workflow).where(Workflow.workspace_id == ws.id)).first()
+    assert wf is not None
+    now = utcnow()
+
+    def run(status: str, age: timedelta) -> WorkflowRun:
+        r = WorkflowRun(
+            workspace_id=ws.id,
+            workflow_id=wf.id,
+            workflow_version=wf.version,
+            status=status,
+            idempotency_key=f"sweeper-{uuid.uuid4()}",
+            trigger_event={"test": True},
+            correlation_id=str(uuid.uuid4()),
+            created_at=now - age,
+            started_at=now - age if status == "running" else None,
+        )
+        db.add(r)
+        return r
+
+    abandoned = run("running", timedelta(hours=2))
+    alive = run("running", timedelta(seconds=5))
+    never_enqueued = run("queued", timedelta(minutes=10))
+    just_created = run("queued", timedelta(seconds=5))
+    db.flush()
+
+    found = set(stale_run_ids(db, now))
+    assert abandoned.id in found, "a run abandoned by a dead worker must be recovered"
+    assert never_enqueued.id in found, "a run that was never enqueued must be recovered"
+    # A run that started moments ago is alive until proven otherwise, and so is a fresh queue entry.
+    assert alive.id not in found
+    assert just_created.id not in found

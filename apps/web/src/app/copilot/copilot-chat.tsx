@@ -125,7 +125,8 @@ function TurnCard({ turn, onAsk, busy }: { turn: Turn; onAsk: (q: string) => voi
       {turn.state === "done" && (
         <>
           <div className="space-y-3 px-4 py-4">
-            {turn.result.confidence < LOW_CONFIDENCE && (
+            {/* Only warn about a weak match when a metric actually ran: a refusal has no "closest one". */}
+            {turn.result.confidence < LOW_CONFIDENCE && turn.result.queries.length > 0 && (
               <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
                 <span className="text-text">
