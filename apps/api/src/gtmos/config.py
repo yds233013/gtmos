@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # LLM provider (optional). Without a key GTMOS uses deterministic demo generators.
     anthropic_api_key: SecretStr | None = None
+    # Live generation is opt-in: a key present in the environment alone never triggers billed API calls.
+    llm_enabled: bool = False
     llm_model: str = "claude-opus-5"
 
     # HubSpot (optional). Without a token the demo adapter is used and every sync is labeled SIMULATED.
@@ -43,7 +45,7 @@ class Settings(BaseSettings):
 
     @property
     def llm_mode(self) -> Literal["live", "demo"]:
-        return "live" if self.anthropic_api_key else "demo"
+        return "live" if self.anthropic_api_key and self.llm_enabled else "demo"
 
     @property
     def hubspot_mode(self) -> Literal["live", "demo"]:

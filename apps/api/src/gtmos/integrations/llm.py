@@ -123,7 +123,7 @@ class AnthropicResearchWriter:
 
 def get_research_writer(settings: Settings) -> ResearchWriter | None:
     """Returns a live writer when configured, else None (use the deterministic generator)."""
-    if settings.anthropic_api_key is None:
+    if settings.llm_mode != "live":
         return None
     try:
         return AnthropicResearchWriter(settings)
