@@ -3,6 +3,8 @@
 Guarantees
 * Idempotency: one run per (workflow version, trigger event), enforced by a unique key in Postgres.
   A re-delivered webhook or a double click cannot run a workflow twice.
+* Single execution: a run is executed by one worker at a time, enforced by a row lock on the run
+  (`SELECT ... FOR UPDATE SKIP LOCKED`); a second worker handed the same run id is a no-op.
 * Resumability: every step's state is persisted. Retrying a failed run skips steps that already
   succeeded and resumes at the failed step.
 * Retries: steps raising TransientError are retried up to `max_attempts`; exhausting retries moves the
@@ -20,6 +22,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -259,7 +262,13 @@ def emit_event(
     ctx = _context(account, payload)
     runs: list[WorkflowRun] = []
     for wf in workflows:
-        definition = WorkflowDefinition.model_validate(wf.definition)
+        try:
+            definition = WorkflowDefinition.model_validate(wf.definition)
+        except ValidationError:
+            # One unparseable workflow must not stop the event from reaching the others (a bad definition
+            # would otherwise take down signal ingestion for the whole workspace).
+            log.exception("skipping workflow '%s': definition does not validate", wf.key)
+            continue
         ok, _ = evaluate_all(definition.trigger.filters, ctx)
         if not ok:
             continue
@@ -354,10 +363,59 @@ def _enqueue_after_commit(session: Session) -> None:
             log.exception("failed to enqueue workflow run %s", run_id)
 
 
+def _claim(db: Session, run_id: uuid.UUID) -> WorkflowRun | None:
+    """Lock the run row so only one worker executes it; return None if someone else already holds it.
+
+    Two workers can legitimately be handed the same run id (an RQ redelivery, the sweeper racing a live
+    worker, a retry racing the original). Persisted step state alone does not stop them: both read the same
+    `pending` rows before either writes, so both call the actions and every side effect whose dedupe is a
+    read-then-write (drafts, routing decisions, enrichment runs) happens twice. `FOR UPDATE SKIP LOCKED`
+    makes the loser a no-op instead of a duplicate, and because the lock is held by the transaction rather
+    than by a status flag, a worker that crashes releases it and the run stays resumable.
+    """
+    return db.scalars(
+        select(WorkflowRun)
+        .where(WorkflowRun.id == run_id)
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+
+
+def _fail_definition(
+    db: Session, run: WorkflowRun, wf: Workflow, steps: list[WorkflowStepRun], exc: ValidationError
+) -> WorkflowRun:
+    problems = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:3])
+    run.status = "failed"
+    run.error = f"invalid workflow definition for '{wf.key}' v{run.workflow_version}: {problems}"
+    run.started_at = run.started_at or utcnow()
+    run.finished_at = utcnow()
+    for step in steps:
+        if step.status == "pending":
+            step.status = "skipped"
+            step.output = {"reason": "workflow definition is invalid"}
+    audit(
+        db,
+        run.workspace_id,
+        "workflow.run_failed",
+        "workflow_run",
+        run.id,
+        after={"workflow": wf.key, "status": "failed"},
+        reason=run.error,
+        actor_type="workflow",
+        actor=wf.key,
+    )
+    db.flush()
+    return run
+
+
 def execute_run(db: Session, run_id: uuid.UUID, *, sleep: Callable[[float], None] | None = None) -> WorkflowRun:
-    run = db.get(WorkflowRun, run_id)
+    run = _claim(db, run_id)
     if run is None:
-        raise ValueError(f"run {run_id} not found")
+        unclaimed = db.get(WorkflowRun, run_id)
+        if unclaimed is None:
+            raise ValueError(f"run {run_id} not found")
+        log.info("workflow run %s is already being executed elsewhere; skipping", run_id)
+        return unclaimed
     if run.status in ("succeeded", "skipped"):
         return run
     wf = db.get(Workflow, run.workflow_id)
@@ -369,7 +427,13 @@ def execute_run(db: Session, run_id: uuid.UUID, *, sleep: Callable[[float], None
     steps = list(
         db.scalars(select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id).order_by(WorkflowStepRun.position))
     )
-    definition = {s.key: s for s in WorkflowDefinition.model_validate(wf.definition).steps}
+    try:
+        definition = {s.key: s for s in WorkflowDefinition.model_validate(wf.definition).steps}
+    except ValidationError as exc:
+        # A definition that stopped validating (hand-edited row, bad migration, a workflow edited between
+        # enqueue and execution) used to escape as an unhandled exception: the worker died and the run was
+        # left mid-flight with no error on it. Fail the run instead, so the Operations page can show why.
+        return _fail_definition(db, run, wf, steps, exc)
     run.status = "running"
     run.started_at = run.started_at or utcnow()
     db.flush()
