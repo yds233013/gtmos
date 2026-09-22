@@ -13,6 +13,7 @@ in this repository (no credentials were available); treat it as an integration b
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any
 
 import httpx
@@ -154,13 +155,14 @@ class ApolloOrganizationProvider:
         self.last_latency_ms = 0
 
     def lookup(self, domain: str, fields: list[str]) -> dict[str, FieldValue]:
+        start = time.perf_counter()
         try:
             r = self._client.get(
                 self.URL, params={"domain": domain}, headers={"X-Api-Key": self._key, "Accept": "application/json"}
             )
         except httpx.HTTPError as exc:
             raise ProviderError(f"apollo: {exc.__class__.__name__}") from exc
-        self.last_latency_ms = int(r.elapsed.total_seconds() * 1000) if r.elapsed else 0
+        self.last_latency_ms = int((time.perf_counter() - start) * 1000)
         if r.status_code == 404:
             return {}
         if r.status_code == 429 or r.status_code >= 500:
