@@ -92,6 +92,31 @@ class DemoFirmographicsProvider(_SimulatedProvider):
         return FieldValue(getattr(p, field), conf)
 
 
+# How a website scanner's taxonomy differs from a firmographics vendor's. Real vendors disagree here
+# constantly: an AI company that sells to developers is "Developer Tools" to one and "AI/ML Platforms"
+# to another, and neither is wrong. Fit scoring depends on which one you believe, so the disagreement
+# has to be visible rather than averaged away.
+TAXONOMY_DRIFT: dict[str, str] = {
+    "AI/ML Platforms": "Developer Tools",
+    "Developer Tools": "AI/ML Platforms",
+    "Data Infrastructure": "B2B SaaS",
+    "B2B SaaS": "Martech",
+    "Fintech": "B2B SaaS",
+    "Healthtech": "B2B SaaS",
+    "Cybersecurity": "B2B SaaS",
+    "E-commerce Software": "Retail",
+    "Martech": "B2B SaaS",
+    "Manufacturing": "Logistics",
+    "Retail": "E-commerce Software",
+    "Media": "B2B SaaS",
+    "Logistics": "Manufacturing",
+}
+# Share of companies where the scanner's headcount is not a noisy version of the truth but a different
+# question answered: it counts one legal entity, or the whole group after an acquisition.
+ENTITY_MISMATCH_RATE = 0.12
+TAXONOMY_DRIFT_RATE = 0.15
+
+
 class DemoWebScanProvider(_SimulatedProvider):
     key = "demo_webscan"
     name = "Website & technographics scanner (simulated)"
@@ -106,9 +131,16 @@ class DemoWebScanProvider(_SimulatedProvider):
         if field == "employee_count":
             # Estimated from LinkedIn-style headcount ranges: noisy and lower confidence.
             noise = 1 + (_h(self.key, domain, "n") - 0.5) * 0.3
-            return FieldValue(int(p.employee_count * noise), 0.55)
+            split = _h(self.key, domain, "entity")
+            if split < ENTITY_MISMATCH_RATE:
+                # Not noise: a different question answered. Below half the band the scanner found only
+                # the primary operating entity; above it, it rolled up an acquired group.
+                noise *= 0.3 if split < ENTITY_MISMATCH_RATE / 2 else 2.8
+            return FieldValue(max(1, int(p.employee_count * noise)), 0.55)
         if field == "industry":
-            return FieldValue(p.industry, 0.68)
+            drifted = _h(self.key, domain, "tax") < TAXONOMY_DRIFT_RATE
+            value = TAXONOMY_DRIFT.get(p.industry, p.industry) if drifted else p.industry
+            return FieldValue(value, 0.68)
         return FieldValue(getattr(p, field), 0.7)
 
 

@@ -1,6 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
-from gtmos.domain.enrichment import Attempt, ExistingValue, FieldValue, ProviderError, decide, run_waterfall
+from gtmos.domain.enrichment import (
+    Attempt,
+    ExistingValue,
+    FieldValue,
+    ProviderError,
+    decide,
+    run_waterfall,
+    values_disagree,
+)
 
 NOW = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -84,3 +92,139 @@ def test_merge_policy_respects_manual_locks_and_confidence():
     assert decide("employee_count", stale, Attempt("employee_count", "p", 0, "hit", 1000, 0.9), NOW).action == "update"
     same = ExistingValue(1000, 0.7, "seed", NOW)
     assert decide("employee_count", same, cand, NOW).action == "keep_existing"
+
+
+# Provider disagreement ---------------------------------------------------------------------------
+
+
+def test_trivial_differences_are_not_treated_as_disagreement():
+    # Headcount measured a month apart, a legal suffix, a casing difference: all the same fact.
+    assert not values_disagree(240, 247)
+    assert not values_disagree("AI/ML Platforms", "ai/ml platforms  ")
+    assert not values_disagree(None, 500)
+    # One provider seeing more of a tech stack than another is coverage, not contradiction.
+    assert not values_disagree(["python", "aws"], ["python", "aws", "kubernetes"])
+
+
+def test_material_differences_are_treated_as_disagreement():
+    assert values_disagree(240, 4000)
+    assert values_disagree("Fintech", "Developer Tools")
+    assert values_disagree(True, False)
+    assert values_disagree(["python", "aws"], ["ruby", "gcp"])
+
+
+def test_a_second_opinion_already_paid_for_is_used_to_flag_a_conflict():
+    """A provider call returns every field it supports, so the losing answer is usually free."""
+    a = FakeProvider(
+        "a",
+        {"employee_count": FieldValue(240, 0.9), "industry": FieldValue("Fintech", 0.5)},
+        ["employee_count", "industry"],
+    )
+    b = FakeProvider(
+        "b",
+        {"employee_count": FieldValue(4000, 0.88), "industry": FieldValue("Developer Tools", 0.9)},
+        ["employee_count", "industry"],
+    )
+    r = run_waterfall(
+        "x.example",
+        ["employee_count", "industry"],
+        {"employee_count": ["a", "b"], "industry": ["a", "b"]},
+        {"a": a, "b": b},
+        {},
+        NOW,
+    )
+    headcount = next(d for d in r.decisions if d.field == "employee_count")
+    # `a` answered confidently at position 0, so the waterfall never asks `b` for headcount — but `b`
+    # was called for industry and its response carried a headcount too.
+    assert headcount.value == 240
+    assert headcount.conflict is not None
+    assert [o.value for o in headcount.conflict.others] == [4000]
+    assert headcount.conflict.material is True
+    assert "4000" in headcount.conflict.explanation
+
+
+def test_agreement_between_providers_produces_no_conflict():
+    a = FakeProvider("a", {"employee_count": FieldValue(240, 0.9)}, ["employee_count"])
+    b = FakeProvider("b", {"employee_count": FieldValue(250, 0.9)}, ["employee_count"])
+    r = run_waterfall("x.example", ["employee_count"], {"employee_count": ["a", "b"]}, {"a": a, "b": b}, {}, NOW)
+    assert r.conflicts == []
+
+
+def test_a_contested_field_is_never_silently_overwritten():
+    """Two confident providers contradicting each other is not grounds to replace a stored value."""
+    existing = {"industry": ExistingValue("Fintech", 0.7, "manual_import", NOW - timedelta(days=10))}
+    a = FakeProvider(
+        "a",
+        {"industry": FieldValue("Developer Tools", 0.95)},  # no headcount, so `b` gets called for it
+        ["industry", "employee_count"],
+    )
+    b = FakeProvider(
+        "b",
+        {"industry": FieldValue("B2B SaaS", 0.9), "employee_count": FieldValue(1, 0.9)},
+        ["industry", "employee_count"],
+    )
+    r = run_waterfall(
+        "x.example",
+        ["industry", "employee_count"],
+        {"industry": ["a", "b"], "employee_count": ["a", "b"]},
+        {"a": a, "b": b},
+        existing,
+        NOW,
+    )
+    industry = next(d for d in r.decisions if d.field == "industry")
+    assert industry.action == "conflict"
+    assert industry.value == "Fintech", "the stored value must survive a contested update"
+    assert "raised it for review" in industry.reason
+    assert industry.field not in r.fields_changed
+
+
+def test_an_empty_field_still_gets_filled_but_records_the_loser():
+    """Having a value beats having none, so `set` stands — the disagreement is recorded, not suppressed."""
+    a = FakeProvider(
+        "a",
+        {"industry": FieldValue("Developer Tools", 0.95)},  # no headcount, so `b` gets called for it
+        ["industry", "employee_count"],
+    )
+    b = FakeProvider(
+        "b",
+        {"industry": FieldValue("Fintech", 0.9), "employee_count": FieldValue(1, 0.9)},
+        ["industry", "employee_count"],
+    )
+    r = run_waterfall(
+        "x.example",
+        ["industry", "employee_count"],
+        {"industry": ["a", "b"], "employee_count": ["a", "b"]},
+        {"a": a, "b": b},
+        {},
+        NOW,
+    )
+    industry = next(d for d in r.decisions if d.field == "industry")
+    assert industry.action == "set"
+    assert industry.value == "Developer Tools"
+    assert industry.conflict is not None and industry.conflict.others[0].value == "Fintech"
+
+
+def test_a_low_confidence_dissent_is_recorded_but_not_material():
+    a = FakeProvider(
+        "a",
+        {"industry": FieldValue("Developer Tools", 0.95)},  # no headcount, so `b` gets called for it
+        ["industry", "employee_count"],
+    )
+    b = FakeProvider(
+        "b",
+        {"industry": FieldValue("Fintech", 0.2), "employee_count": FieldValue(1, 0.9)},
+        ["industry", "employee_count"],
+    )
+    existing = {"industry": ExistingValue("B2B SaaS", 0.5, "manual_import", NOW - timedelta(days=10))}
+    r = run_waterfall(
+        "x.example",
+        ["industry", "employee_count"],
+        {"industry": ["a", "b"], "employee_count": ["a", "b"]},
+        {"a": a, "b": b},
+        existing,
+        NOW,
+    )
+    industry = next(d for d in r.decisions if d.field == "industry")
+    assert industry.conflict is not None and industry.conflict.material is False
+    # A guess from a provider that admits it is guessing does not block a confident upgrade.
+    assert industry.action == "update"

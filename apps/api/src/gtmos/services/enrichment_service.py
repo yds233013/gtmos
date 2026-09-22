@@ -85,10 +85,29 @@ def enrich_account(
         for a in result.attempts
     )
 
+    def conflict_payload(d: Any) -> dict[str, Any] | None:
+        if d.conflict is None:
+            return None
+        return {
+            "chosen_value": jsonable(d.conflict.chosen_value),
+            "chosen_provider": d.conflict.chosen_provider,
+            "others": [
+                {"provider": o.provider, "value": jsonable(o.value), "confidence": o.confidence}
+                for o in d.conflict.others
+            ],
+            "material": d.conflict.material,
+            "explanation": d.conflict.explanation,
+            "observed_at": now.isoformat(),
+        }
+
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
     for d in result.decisions:
         if d.action not in ("set", "update"):
+            if d.field in prov:
+                # A disagreement is recorded even when nothing was written. That is the whole point of
+                # the `conflict` action: the field keeps its value and stops looking unanimous.
+                prov[d.field].conflict = conflict_payload(d)
             if d.action == "keep_existing" and d.field in prov and d.confidence:
                 prov[d.field].confidence = max(prov[d.field].confidence, d.confidence)
             continue
@@ -106,6 +125,7 @@ def enrich_account(
         p.confidence = d.confidence or 0.0
         p.observed_at = now
         p.enrichment_run_id = run.id
+        p.conflict = conflict_payload(d)
     if "employee_count" in after:
         account.segment = segment_for(account.employee_count)
     account.last_enriched_at = now

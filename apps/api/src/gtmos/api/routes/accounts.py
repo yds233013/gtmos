@@ -311,6 +311,7 @@ def account_detail(
                 "observed_at": p.observed_at,
                 "enrichment_run_id": str(p.enrichment_run_id) if p.enrichment_run_id else None,
                 "is_manual_lock": p.is_manual_lock,
+                "conflict": p.conflict,
             }
             for f, p in prov.items()
         },

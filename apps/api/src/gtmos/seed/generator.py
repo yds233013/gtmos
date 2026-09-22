@@ -2687,7 +2687,9 @@ def seed(
     db.flush()
 
     # Enrichment history on a sample (real waterfall against simulated providers)
-    sample = [a for a in live_accounts if a.domain and a.score_grade in ("A", "B")][:40]
+    # Wide enough that provider disagreement actually appears in the dataset: with 40 accounts the
+    # conflict rate produced one or two, which reads as a fluke rather than a property of enrichment.
+    sample = [a for a in live_accounts if a.domain and a.score_grade in ("A", "B")][:150]
     for a in sample:
         enrich_account(db, a, trigger="seed:backfill", now=a.last_enriched_at or now)
     rescore_accounts(db, ws.id, [a.id for a in sample], trigger="seed:post-enrichment", now=now, write_audit=False)
@@ -2760,6 +2762,9 @@ def seed(
             executed += _execute_backdated(db, ws.id, flagship, sig, sig["observed_at"] + timedelta(minutes=minutes))
 
     sync = run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="seed")
+    # The session runs with autoflush off, so pending work (notably the enrichment backfill's provider
+    # conflicts) must reach the database before the scan queries for it, or the summary under-reports.
+    db.flush()
     dq = data_quality.scan(db, ws.id, write_audit=False)
     db.add(
         AuditEvent(

@@ -19,6 +19,9 @@ NAMING_CONVENTION = {
 }
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
+# Same type, but a Python None is written as SQL NULL instead of JSON null. Use it wherever "no value"
+# must be distinguishable from "the value is null" — `IS NOT NULL` filters depend on it.
+NullableJSONType = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 
 def utcnow() -> datetime:

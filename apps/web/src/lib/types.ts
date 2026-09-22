@@ -326,7 +326,7 @@ export interface AccountDetail {
     hubspot_company_id: string | null;
     source: string;
   };
-  provenance: Record<string, { source: string; confidence: number; observed_at: string; is_manual_lock: boolean }>;
+  provenance: Record<string, FieldProvenance>;
   score:
     | (Categories & {
         id: string;
@@ -416,6 +416,30 @@ export interface Funnel {
   }[];
   lost: number;
   note: string;
+}
+
+/** A provider answer that lost to the one that was kept. */
+export interface Disagreement {
+  provider: string;
+  value: unknown;
+  confidence: number | null;
+}
+
+export interface FieldConflict {
+  chosen_value: unknown;
+  chosen_provider: string | null;
+  others: Disagreement[];
+  material: boolean;
+  explanation: string;
+  observed_at: string;
+}
+
+export interface FieldProvenance {
+  source: string;
+  confidence: number;
+  observed_at: string;
+  is_manual_lock: boolean;
+  conflict: FieldConflict | null;
 }
 
 export interface MetricDefinition {

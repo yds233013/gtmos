@@ -28,6 +28,7 @@ from gtmos.models import (
     Contact,
     DataQualityIssue,
     Engagement,
+    FieldProvenance,
     MessageDraft,
     Opportunity,
     Signal,
@@ -92,6 +93,12 @@ RULES: dict[str, dict[str, str]] = {
         "label": "Bad CRM external IDs",
         "severity": "high",
         "why": "Malformed or duplicated CRM IDs make sync create or overwrite the wrong record.",
+    },
+    "provider_conflict": {
+        "label": "Providers disagree on a field",
+        "severity": "medium",
+        "why": "Two confident sources contradict each other, so the field is a coin flip that scoring, "
+        "segmentation and routing all depend on. Someone has to decide which one is right.",
     },
 }
 
@@ -467,6 +474,54 @@ def rule_bad_external_ids(db: Session, ws: uuid.UUID, now: datetime) -> list[Can
     return out
 
 
+def rule_provider_conflict(db: Session, ws: uuid.UUID, now: datetime) -> list[Candidate]:
+    """Fields where enrichment kept one answer and recorded a confident contradiction from another.
+
+    Only material conflicts reach here: the waterfall already discards casing, suffix and small
+    numeric differences, because a flag that fires on noise is a flag nobody reads.
+    """
+    rows = db.execute(
+        select(FieldProvenance, Account.name)
+        .join(Account, Account.id == FieldProvenance.entity_id)
+        .where(
+            FieldProvenance.workspace_id == ws,
+            FieldProvenance.entity_type == "account",
+            FieldProvenance.conflict.is_not(None),
+            Account.merged_into_id.is_(None),
+        )
+    ).all()
+    out = []
+    for p, account_name in rows:
+        conflict = p.conflict or {}
+        if not conflict.get("material"):
+            continue
+        others = conflict.get("others") or []
+        out.append(
+            Candidate(
+                "provider_conflict",
+                "account",
+                p.entity_id,
+                f"{account_name}: sources disagree on {p.field}",
+                {
+                    "field": p.field,
+                    "kept": conflict.get("chosen_value"),
+                    "kept_from": conflict.get("chosen_provider"),
+                    "rejected": [{"provider": o.get("provider"), "value": o.get("value")} for o in others],
+                    "explanation": conflict.get("explanation"),
+                    "is_manual_lock": p.is_manual_lock,
+                },
+                {
+                    "action": "enrich_account",
+                    "params": {"account_id": str(p.entity_id)},
+                    "description": "Re-run enrichment to see whether the sources still disagree. If they "
+                    "do, the field needs a human decision and a manual lock.",
+                },
+                key=f"{p.entity_id}:{p.field}",
+            )
+        )
+    return out
+
+
 RULE_FUNCS: dict[str, Callable[[Session, uuid.UUID, datetime], list[Candidate]]] = {
     "duplicate_contact": rule_duplicate_contacts,
     "duplicate_account": rule_duplicate_accounts,
@@ -479,6 +534,7 @@ RULE_FUNCS: dict[str, Callable[[Session, uuid.UUID, datetime], list[Candidate]]]
     "missing_owner": rule_missing_owner,
     "invalid_pipeline_transition": rule_invalid_transitions,
     "bad_external_id": rule_bad_external_ids,
+    "provider_conflict": rule_provider_conflict,
 }
 
 

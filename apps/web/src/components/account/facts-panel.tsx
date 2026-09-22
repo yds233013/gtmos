@@ -1,7 +1,10 @@
+import { Fragment } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { money, num, pct, relTime, segment } from "@/lib/format";
-import type { AccountDetail } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { AccountDetail, FieldConflict } from "@/lib/types";
 
 const FIELDS: { key: string; label: string; fmt?: (v: unknown) => string }[] = [
   { key: "industry", label: "Industry" },
@@ -22,6 +25,34 @@ function SourceBadge({ source }: { source: string }) {
     <Badge tone={simulated ? "warning" : "neutral"} title={simulated ? "Simulated provider" : undefined}>
       {source}
     </Badge>
+  );
+}
+
+function show(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (Array.isArray(v)) return v.join(", ");
+  return typeof v === "number" ? v.toLocaleString() : String(v);
+}
+
+/**
+ * The answer that was rejected. Showing it is the point: a value sourced from three providers that
+ * agree and a value one provider won by 0.05 confidence look identical otherwise.
+ */
+function ConflictRow({ conflict, span }: { conflict: FieldConflict; span: number }) {
+  return (
+    <tr className="border-b border-border bg-warning-soft/40 last:border-0">
+      <td />
+      <td colSpan={span} className="px-2 pb-2 text-[11px] text-muted">
+        <span className="font-medium text-warning">{conflict.material ? "Sources disagree" : "Minor disagreement"}</span>{" "}
+        {conflict.others.map((o) => (
+          <span key={o.provider} className="mr-2 whitespace-nowrap">
+            {o.provider} said <span className="font-medium text-text">{show(o.value)}</span>
+            {o.confidence !== null && ` (${Math.round(o.confidence * 100)}%)`}
+          </span>
+        ))}
+        {conflict.material && " — kept the stored value; this needs a human decision, not a confidence tie-break."}
+      </td>
+    </tr>
   );
 }
 
@@ -47,16 +78,19 @@ export function FactsPanel({ data }: { data: AccountDetail }) {
             const p = prov[f.key];
             const empty = v === null || v === undefined || v === "";
             return (
-              <tr key={f.key} className="border-b border-border last:border-0">
-                <td className="px-4 py-1.5 text-muted">{f.label}</td>
-                <td className="px-2 py-1.5 font-medium">
-                  {empty ? <span className="text-warning">Missing</span> : f.fmt ? f.fmt(v) : String(v)}
-                </td>
-                <td className="px-2 py-1.5">{p ? <SourceBadge source={p.source} /> : <span className="text-subtle">—</span>}</td>
-                <td className="tabular px-4 py-1.5 text-right text-muted" title={p ? `Observed ${relTime(p.observed_at)}` : undefined}>
-                  {p ? pct(p.confidence, 0) : "—"}
-                </td>
-              </tr>
+              <Fragment key={f.key}>
+                <tr className={cn("border-b border-border last:border-0", p?.conflict && "border-b-0")}>
+                  <td className="px-4 py-1.5 text-muted">{f.label}</td>
+                  <td className="px-2 py-1.5 font-medium">
+                    {empty ? <span className="text-warning">Missing</span> : f.fmt ? f.fmt(v) : String(v)}
+                  </td>
+                  <td className="px-2 py-1.5">{p ? <SourceBadge source={p.source} /> : <span className="text-subtle">—</span>}</td>
+                  <td className="tabular px-4 py-1.5 text-right text-muted" title={p ? `Observed ${relTime(p.observed_at)}` : undefined}>
+                    {p ? pct(p.confidence, 0) : "—"}
+                  </td>
+                </tr>
+                {p?.conflict && <ConflictRow conflict={p.conflict} span={3} />}
+              </Fragment>
             );
           })}
           <tr>

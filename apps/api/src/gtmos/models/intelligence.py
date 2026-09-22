@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gtmos.models.base import Base, IdMixin, JSONType, TimestampMixin
+from gtmos.models.base import Base, IdMixin, JSONType, NullableJSONType, TimestampMixin
 
 
 class ICPProfile(IdMixin, TimestampMixin, Base):
@@ -151,6 +151,12 @@ class FieldProvenance(IdMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("enrichment_runs.id", ondelete="SET NULL"))
     is_manual_lock: Mapped[bool] = mapped_column(default=False)
+    # The provider answers that lost, when they materially disagreed with the one that won. Kept so a
+    # rep can see what the alternative was and why it was not taken, instead of a value that appears
+    # unanimous. Shape: {"chosen_value", "chosen_provider", "others": [...], "material", "explanation"}.
+    # `none_as_null` so "no conflict" is SQL NULL rather than JSON null: the data-quality rule and the
+    # UI both test for absence, and JSON null is present.
+    conflict: Mapped[dict[str, Any] | None] = mapped_column(NullableJSONType, nullable=True)
 
 
 class ResearchReport(IdMixin, Base):

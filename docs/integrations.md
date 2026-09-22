@@ -237,6 +237,17 @@ The simulated providers answer from the same deterministic company universe the 
 
 The waterfall (`DEFAULT_WATERFALL`) tries providers per field in order, caching one call per provider per run. Answers below 0.6 confidence are held as fallbacks. The merge policy never overwrites a manual lock and replaces an existing value only with a clearly better one (+0.1 confidence, or the existing value is more than 180 days old). Every attempt, including misses, is stored in `enrichment_attempts`, and the winning value's provenance in `field_provenance`.
 
+### When providers disagree
+
+A waterfall stops asking as soon as one provider answers confidently, which makes it look as though there is never a second opinion. There usually is. A provider call returns every field that provider supports and GTMOS caches the whole response for the run, so when a later position calls another provider for some *other* field, that response normally carries an unsolicited second opinion on fields already resolved. Those observations used to be discarded. Now they are compared with the answer that won, at no extra cost and no extra API call.
+
+- **Only differences worth acting on count.** `values_disagree` ignores casing, whitespace and legal suffixes, treats numbers within 15% as the same fact measured differently, and treats one provider seeing more of a tech stack than another as coverage rather than contradiction. A flag that fires on noise is a flag nobody reads.
+- **Materiality is about consequence, not confidence alone.** A dissent counts as material if the dissenting provider is confident (≥ 0.6) *or* the numbers differ by more than 50% — a gap that size moves an account between segments, and therefore changes scoring and routing, whatever the source thinks of itself.
+- **A contested field is never silently overwritten.** When two sources materially contradict each other about a field that already holds a value, the decision becomes `conflict`: the stored value stays, and the disagreement is raised. Letting the marginally more self-assured provider win is how a CRM fills up with confident nonsense. An empty field is still filled — a value beats no value — but the rejected answer is recorded alongside it.
+- **The losing answer is kept and shown.** `field_provenance.conflict` stores the rejected values, who said them and how sure they were. The account page renders it under the field, and `data_quality`'s `provider_conflict` rule raises material conflicts as reviewable issues with a suggested fix (re-enrich; if the sources still disagree, decide and set a manual lock).
+
+The simulated providers disagree the way real ones do, deterministically: the website scanner uses a different industry taxonomy for about 15% of companies (an AI company selling to developers is "Developer Tools" to one vendor and "AI/ML Platforms" to another), and for about 12% its headcount answers a different question — one legal entity, or a whole acquired group — rather than being a noisy version of the same number.
+
 `ApolloOrganizationProvider` calls `GET https://api.apollo.io/api/v1/organizations/enrich?domain=…` with an `X-Api-Key` header and is registered only when `APOLLO_API_KEY` is set. Without it, Apollo's waterfall positions record `skipped: provider not configured`. Its field mapping and error handling are unit-tested with a mocked transport. **It has not been exercised against the live Apollo API.** Treat the field mapping and the fixed 0.8 confidence as assumptions to verify.
 
 ---

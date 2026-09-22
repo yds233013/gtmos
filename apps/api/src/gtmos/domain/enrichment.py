@@ -59,14 +59,38 @@ class ExistingValue:
     is_manual_lock: bool = False
 
 
+@dataclass(frozen=True)
+class Disagreement:
+    """A provider answer that lost, kept so the losing value is visible rather than discarded."""
+
+    provider: str
+    value: Any
+    confidence: float | None
+
+
+@dataclass
+class FieldConflict:
+    field: str
+    chosen_value: Any
+    chosen_provider: str | None
+    others: list[Disagreement]
+    material: bool
+    explanation: str
+
+
 @dataclass
 class FieldDecision:
     field: str
-    action: str  # set | update | keep_existing | no_data
+    # set | update | keep_existing | no_data | conflict
+    # `conflict` means providers disagreed materially about a field that already had a value, so the
+    # existing value was kept and the disagreement raised for a human instead of being resolved by
+    # confidence alone.
+    action: str
     value: Any
     confidence: float | None
     provider: str | None
     reason: str
+    conflict: FieldConflict | None = None
 
 
 @dataclass
@@ -83,6 +107,10 @@ class WaterfallResult:
     @property
     def fields_changed(self) -> list[str]:
         return [d.field for d in self.decisions if d.action in ("set", "update")]
+
+    @property
+    def conflicts(self) -> list[FieldConflict]:
+        return [d.conflict for d in self.decisions if d.conflict is not None]
 
     @property
     def status(self) -> str:
@@ -170,6 +198,108 @@ def decide(field_name: str, existing: ExistingValue | None, candidate: Attempt |
     )
 
 
+# Two numbers this close are the same fact measured differently (a headcount of 240 vs 247), not a
+# disagreement worth a human's time.
+NUMERIC_TOLERANCE = 0.15
+
+
+def values_disagree(a: Any, b: Any) -> bool:
+    """Is the difference between two provider answers worth surfacing?
+
+    Providers disagree constantly in trivial ways — casing, legal suffixes, a headcount taken a month
+    apart. Flagging those would train everyone to ignore the flag, so only differences a human would
+    act on count.
+    """
+    if a is None or b is None:
+        return False
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is not b
+    if isinstance(a, int | float) and isinstance(b, int | float):
+        largest = max(abs(float(a)), abs(float(b)))
+        if largest == 0:
+            return False
+        return abs(float(a) - float(b)) / largest > NUMERIC_TOLERANCE
+    if isinstance(a, list | tuple | set) and isinstance(b, list | tuple | set):
+        # Tech stacks are coverage, not contradiction: one provider seeing more tools than another is
+        # normal. Only a genuine contradiction — each sees something the other denies — counts.
+        sa, sb = {str(x).strip().casefold() for x in a}, {str(x).strip().casefold() for x in b}
+        return bool(sa - sb) and bool(sb - sa)
+    if isinstance(a, str) and isinstance(b, str):
+        return a.strip().casefold() != b.strip().casefold()
+    return bool(a != b)
+
+
+# A disagreement this large is not measurement error; it is two sources answering different questions
+# (one legal entity versus a whole group). It changes the segment, so it changes routing and scoring.
+MATERIAL_NUMERIC_GAP = 0.5
+
+
+def _large_numeric_gap(a: Any, b: Any) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return False
+    if not isinstance(a, int | float) or not isinstance(b, int | float):
+        return False
+    largest = max(abs(float(a)), abs(float(b)))
+    return largest > 0 and abs(float(a) - float(b)) / largest > MATERIAL_NUMERIC_GAP
+
+
+def detect_conflict(
+    decision: FieldDecision, observations: list[Disagreement], min_confidence: float = DEFAULT_MIN_CONFIDENCE
+) -> FieldConflict | None:
+    """Compare the chosen answer with every other answer the run already paid for.
+
+    This costs nothing extra, which is the point. A waterfall stops asking as soon as one provider
+    answers confidently, so it looks like there is no second opinion to be had — but a provider call
+    returns every field that provider supports, and GTMOS caches the whole response for the run. When
+    a later position calls another provider for *some other* field, that response usually carries an
+    unsolicited second opinion on fields already resolved. Those observations are otherwise discarded.
+    """
+    chosen = decision.value
+    others = [o for o in observations if o.provider != decision.provider and values_disagree(chosen, o.value)]
+    if not others:
+        return None
+    # Materiality is about consequence, not only about how sure the dissenter sounds. A confident
+    # contradiction counts; so does a numeric gap large enough to move an account between segments,
+    # even from a source that admits it is estimating.
+    material = any(
+        (o.confidence is not None and o.confidence >= min_confidence) or _large_numeric_gap(chosen, o.value)
+        for o in others
+    )
+    listed = ", ".join(f"{o.provider} says {o.value!r}" for o in others)
+    return FieldConflict(
+        field=decision.field,
+        chosen_value=chosen,
+        chosen_provider=decision.provider,
+        others=others,
+        material=material,
+        explanation=f"Kept {chosen!r} from {decision.provider}; {listed}.",
+    )
+
+
+def apply_conflict(
+    decision: FieldDecision, conflict: FieldConflict | None, existing: ExistingValue | None
+) -> FieldDecision:
+    """Attach a conflict, and refuse to overwrite an existing value on a contested answer.
+
+    Confidence is a provider's opinion of itself. When two confident providers contradict each other
+    about a field that already holds a value, the honest move is to keep what is there and ask a
+    human, not to let the marginally more self-assured provider win silently.
+    """
+    if conflict is None:
+        return decision
+    decision.conflict = conflict
+    if decision.action == "update" and conflict.material and existing is not None:
+        decision.action = "conflict"
+        decision.value = existing.value
+        decision.confidence = existing.confidence
+        decision.provider = existing.source
+        decision.reason = (
+            f"Providers disagree materially ({conflict.explanation}) — kept the existing value and "
+            "raised it for review rather than overwriting on confidence alone."
+        )
+    return decision
+
+
 def run_waterfall(
     domain: str,
     fields: list[str],
@@ -255,5 +385,21 @@ def run_waterfall(
                 attempts.append(att)
                 resolved[f] = att
 
-    decisions = [decide(f, existing.get(f), resolved.get(f) or fallback.get(f), now) for f in fields]
+    # Every answer the run paid for, including the ones no attempt was ever recorded against: a
+    # provider called at position 2 for one field also answered the fields resolved at position 0.
+    observed: dict[str, list[Disagreement]] = {}
+    for provider_key, resp in responses.items():
+        if isinstance(resp, ProviderError):
+            continue
+        for f, fv in resp.items():
+            if f in fields and fv.value not in (None, "", []):
+                observed.setdefault(f, []).append(Disagreement(provider_key, fv.value, fv.confidence))
+
+    decisions = []
+    for f in fields:
+        decision = decide(f, existing.get(f), resolved.get(f) or fallback.get(f), now)
+        if decision.action != "no_data":
+            conflict = detect_conflict(decision, observed.get(f, []), min_confidence)
+            decision = apply_conflict(decision, conflict, existing.get(f))
+        decisions.append(decision)
     return WaterfallResult(attempts, decisions, round(cost, 4), called)
