@@ -26,11 +26,17 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
       <body className="min-h-screen font-sans text-sm">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-panel focus:px-3 focus:py-2 focus:text-text focus:shadow"
+        >
+          Skip to content
+        </a>
         <div className="flex min-h-screen flex-col lg:flex-row">
           <Sidebar workspaceName={ws?.name ?? "GTMOS"} />
           <div className="flex min-w-0 flex-1 flex-col">
             <ModeBanner ws={ws} />
-            <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 lg:px-8">{children}</main>
+            <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 lg:px-8">{children}</main>
           </div>
         </div>
       </body>
