@@ -35,7 +35,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
   deterministic account-level A/B assignment with Wilson and Newcombe intervals and minimum-sample gating.
 - Built a **GTM Stack Inspector** and data-quality engine (11 rules, audited remediation such as contact and
   account merges) that computes system health and ranks automation opportunities with traceable evidence.
-- Shipped with **120 backend tests** (unit + Postgres integration), **14 component tests** and a **22-test
+- Shipped with **123 backend tests** (unit + Postgres integration), **14 component tests** and a **22-test
   Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command Docker
   Compose stack.
 
@@ -43,7 +43,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 
 Built GTMOS, an AI-native GTM system (FastAPI/Postgres/Next.js) with explainable account scoring, an
 enrichment waterfall, idempotent workflows, a HubSpot reverse-ETL boundary, signed webhook ingestion, and
-evidence-grounded AI outreach behind human approval; 156 automated tests.
+evidence-grounded AI outreach behind human approval; 159 automated tests.
 
 ## How to talk about scope honestly
 

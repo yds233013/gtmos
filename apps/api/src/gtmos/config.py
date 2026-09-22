@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     @property
     def hubspot_mode(self) -> Literal["live", "demo"]:
-        return "live" if self.hubspot_access_token else "demo"
+        return "live" if self.hubspot_access_token and self.hubspot_live_writes_enabled else "demo"
 
 
 @lru_cache

@@ -74,5 +74,7 @@ def verify_hubspot_v3(
     now = time.time() if now is None else now
     if now - ts > MAX_SKEW_SECONDS:
         return False, "timestamp older than 5 minutes"
+    if ts - now > MAX_SKEW_SECONDS:
+        return False, "timestamp is in the future"
     expected = hubspot_v3_signature(client_secret, method, uri, body, timestamp_ms)
     return (True, "valid") if hmac.compare_digest(expected, signature) else (False, "signature mismatch")

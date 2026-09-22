@@ -166,3 +166,10 @@ def test_hubspot_v3_signature_verification():
         verify_hubspot_v3(secret, "POST", uri, body, hubspot_v3_signature(secret, "POST", uri, body, stale), stale)[1]
         == "timestamp older than 5 minutes"
     )
+
+
+def test_hubspot_v3_rejects_future_timestamps():
+    secret, body, uri = "s", b"[]", "https://gtmos.example/api/v1/webhooks/hubspot"
+    future = str(int((time.time() + 600) * 1000))
+    sig = hubspot_v3_signature(secret, "POST", uri, body, future)
+    assert verify_hubspot_v3(secret, "POST", uri, body, sig, future) == (False, "timestamp is in the future")

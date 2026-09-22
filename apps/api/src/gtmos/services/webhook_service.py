@@ -99,6 +99,12 @@ def receive(
     existing = db.scalars(
         select(WebhookEvent).where(WebhookEvent.source == source, WebhookEvent.idempotency_key == key)
     ).first()
+    if existing is not None and existing.status == "failed" and verification.status != "invalid":
+        # The sender is retrying an event we failed to process: process it again instead of acking a failure.
+        existing.attempts += 1
+        existing.duplicate_count += 1
+        _process(db, existing, payload, processor)
+        return ReceiveResult(existing, False, 200 if existing.status == "processed" else 202)
     if existing is not None and existing.status != "rejected":
         existing.duplicate_count += 1
         db.flush()

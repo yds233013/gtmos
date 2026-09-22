@@ -355,3 +355,33 @@ def test_signals_are_unique_per_workspace(db, ws):
         .having(func.count() > 1)
     ).all()
     assert dupes == []
+
+
+def test_failed_webhook_is_reprocessed_on_sender_retry(client, monkeypatch):
+    from gtmos.api.routes import integrations as integ
+
+    calls = {"n": 0}
+    real = integ._posthog_processor
+
+    def flaky_factory(ws):
+        inner = real(ws)
+
+        def process(db, payload):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("transient DB blip (test)")
+            return inner(db, payload)
+
+        return process
+
+    monkeypatch.setattr(integ, "_posthog_processor", flaky_factory)
+    ev = {
+        "event": "pricing_page_viewed",
+        "distinct_id": "x@kestrel-analytics.example",
+        "uuid": str(uuid.uuid4()),
+        "properties": {"$groups": {"company": "kestrel-analytics.example"}},
+    }
+    first = client.post("/api/v1/webhooks/posthog", json=ev).json()
+    assert first["status"] == "failed"
+    second = client.post("/api/v1/webhooks/posthog", json=ev).json()
+    assert second["status"] == "processed" and second["duplicate"] is False

@@ -191,3 +191,12 @@ def test_call_prep_evidence_refs_are_not_treated_as_numeric_claims():
     assert call.channel == "call_prep"
     grounded = next(g for g in call.guardrails if g.check == "numbers_grounded")
     assert grounded.passed, grounded.detail  # regression: "[E12]" used to fail as an ungrounded "12"
+
+
+def test_contact_with_two_roles_is_one_piece_of_evidence():
+    inp = research_input()
+    member = inp.committee[0]
+    inp.committee.append({**member, "role": "technical_evaluator", "role_label": "Technical evaluator"})
+    out = generate_deterministic(inp)
+    contact_refs = [e for e in out.evidence if e.record_id == member["contact_id"]]
+    assert len(contact_refs) == 1

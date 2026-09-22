@@ -98,6 +98,8 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
     index: dict[str, str] = {}
 
     def add(key: str, **kw: Any) -> str:
+        if key in index:  # e.g. one contact holding two committee roles is one piece of evidence
+            return index[key]
         ref = f"E{len(ev) + 1}"
         ev.append(Evidence(ref=ref, **kw))
         index[key] = ref

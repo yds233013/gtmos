@@ -38,7 +38,7 @@ deterministic?*
   (protocols with demo and live implementations) → thin routes.
 - Idempotency is structural: unique keys on signals, workflow runs, webhook events and external records;
   savepoint-guarded run creation; payload hashing; side effects keyed by run id.
-- Tests exercise behavior rather than lines: 55 unit, 65 Postgres integration (each in a rolled-back
+- Tests exercise behavior rather than lines: 57 unit, 66 Postgres integration (each in a rolled-back
   transaction), 14 component, 22 E2E against the production build. mypy --strict, ruff, ESLint and tsc are clean.
 - Migrations apply from scratch and `alembic check` reports no drift.
 
@@ -55,6 +55,9 @@ deterministic?*
 | Seed hung forever above 1,820 accounts (name space exhausted) | seed run | qualifiers added after repeated collisions |
 | Seeded failure history attached failures to non-existent steps and mismatched conditions | agent review | real condition evaluation; failures on actual steps |
 | An API key present in the shell would have made seeds call the live LLM | manual review | live LLM requires `LLM_ENABLED=true` in addition to a key |
+| A webhook that failed processing was acked as a duplicate when the sender retried | doc review | failed events are reprocessed on redelivery; integration test |
+| A contact holding two committee roles appeared twice in the evidence pack | doc review | evidence keyed by record; unit test |
+| HubSpot v3 verifier accepted far-future timestamps | doc review | rejected beyond the 5-minute skew; unit test |
 
 **Open findings**
 - Single-operator auth. Acceptable for a demo, documented; production needs OIDC + RBAC + row-level scoping.

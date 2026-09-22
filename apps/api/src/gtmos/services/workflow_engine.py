@@ -42,6 +42,9 @@ class StepSkipped(Exception):
     """The step had nothing to do (e.g. no eligible contact); not a failure."""
 
 
+# The worker sleeps between attempts in-process; longer delays belong in a scheduler (see docs/architecture.md).
+MAX_INLINE_BACKOFF_SECONDS = 30.0
+
 ActionFn = Callable[[Session, WorkflowRun, Account, dict[str, Any]], dict[str, Any]]
 
 
@@ -411,7 +414,7 @@ def execute_run(db: Session, run_id: uuid.UUID, *, sleep: Callable[[float], None
                 wait = backoff_seconds(step.attempts)
                 logs.append({"at": utcnow().isoformat(), "level": "info", "msg": f"retrying in {wait:.0f}s"})
                 if sleep:
-                    sleep(min(wait, 2.0))
+                    sleep(min(wait, MAX_INLINE_BACKOFF_SECONDS))
             except Exception as exc:  # permanent failure; captured, never crashes the worker
                 log.exception("workflow step failed run=%s step=%s", run.id, step.step_key)
                 step.status = "failed"
