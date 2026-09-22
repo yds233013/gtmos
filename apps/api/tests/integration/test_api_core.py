@@ -63,9 +63,15 @@ def test_rescore_is_deterministic(client, flagship):
 
 
 def test_enrichment_fills_missing_fields_with_provenance(client, db, ws):
-    target = db.scalars(select(Account).where(Account.workspace_id == ws.id, Account.employee_count.is_(None),
-                                              Account.domain.is_not(None), Account.merged_into_id.is_(None),
-                                              ~Account.domain.like("www.%"))).first()
+    target = db.scalars(
+        select(Account).where(
+            Account.workspace_id == ws.id,
+            Account.employee_count.is_(None),
+            Account.domain.is_not(None),
+            Account.merged_into_id.is_(None),
+            ~Account.domain.like("www.%"),
+        )
+    ).first()
     assert target is not None
     r = client.post(f"/api/v1/accounts/{target.id}/enrich").json()
     assert r["run"]["is_simulated"] is True
@@ -88,7 +94,10 @@ def test_routing_preview_does_not_apply(client, flagship, db):
 def test_committee_override_persists_through_recompute(client, flagship):
     d = client.get(f"/api/v1/accounts/{flagship.id}").json()
     tomas = next(c for c in d["contacts"] if c["full_name"] == "Tomás Alvarez")
-    assert client.put(f"/api/v1/accounts/{flagship.id}/committee/champion", json={"contact_id": tomas["id"]}).status_code == 200
+    assert (
+        client.put(f"/api/v1/accounts/{flagship.id}/committee/champion", json={"contact_id": tomas["id"]}).status_code
+        == 200
+    )
     client.post(f"/api/v1/accounts/{flagship.id}/committee/recompute")
     d2 = client.get(f"/api/v1/accounts/{flagship.id}").json()
     champ = next(r for r in d2["committee"] if r["role"] == "champion" and r["rank"] == 1)
@@ -139,8 +148,11 @@ def test_draft_approval_state_machine_and_guardrail_block(client, flagship, db):
 
 
 def test_stage_transition_rules_enforced(client, db, ws):
-    a = db.scalars(select(Account).where(Account.workspace_id == ws.id, Account.funnel_stage == "prospect",
-                                         Account.merged_into_id.is_(None))).first()
+    a = db.scalars(
+        select(Account).where(
+            Account.workspace_id == ws.id, Account.funnel_stage == "prospect", Account.merged_into_id.is_(None)
+        )
+    ).first()
     assert client.post(f"/api/v1/accounts/{a.id}/stage", json={"stage": "won"}).status_code == 409
     r = client.post(f"/api/v1/accounts/{a.id}/stage", json={"stage": "engaged"}).json()
     assert r["funnel_stage"] == "engaged" and r["lifecycle_stage"] == "marketingqualifiedlead"

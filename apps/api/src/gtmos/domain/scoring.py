@@ -400,8 +400,10 @@ def _summary(result_cats: dict[str, CategoryScore], total: int) -> str:
     """One sentence a rep can read: strong categories, the signals behind them, and the gaps."""
     strong = [c for c in result_cats.values() if c.max_points > 0 and c.points / c.max_points >= 0.7]
     weak = [c for c in result_cats.values() if c.max_points > 0 and c.points / c.max_points < 0.35]
-    signals = sorted((c for cat in result_cats.values() for c in cat.components
-                      if c.key.startswith("signal:") and c.points > 0), key=lambda c: (-c.points, c.key))
+    signals = sorted(
+        (c for cat in result_cats.values() for c in cat.components if c.key.startswith("signal:") and c.points > 0),
+        key=lambda c: (-c.points, c.key),
+    )
     text = f"Scores {total}/100"
     if strong:
         text += "; strong " + ", ".join(f"{c.category} ({c.points:g}/{c.max_points:g})" for c in strong)

@@ -132,8 +132,9 @@ def receive(
     return _finish(db, ev, verification, payload, processor)
 
 
-def _finish(db: Session, ev: WebhookEvent, verification: VerifyResult, payload: Any, processor: Processor
-            ) -> ReceiveResult:
+def _finish(
+    db: Session, ev: WebhookEvent, verification: VerifyResult, payload: Any, processor: Processor
+) -> ReceiveResult:
     if verification.status == "invalid":
         ev.status = "rejected"
         ev.error = f"signature check failed: {verification.detail}"

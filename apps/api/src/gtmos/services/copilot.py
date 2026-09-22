@@ -299,8 +299,9 @@ def answer(db: Session, ws: uuid.UUID, question: str) -> dict[str, Any]:
         data = {"velocity": v}
 
     elif p.intent == "unsupported":
-        lines.append("I can only answer questions that map to an approved GTM analysis, and this one doesn't. "
-                     "Try one of these:")
+        lines.append(
+            "I can only answer questions that map to an approved GTM analysis, and this one doesn't. Try one of these:"
+        )
         lines.extend(f"- {q}" for q in suggested_questions()[:6])
     else:  # investigate
         rep = stack_inspector.inspect(db, ws)

@@ -58,14 +58,24 @@ def _anchor(db: Session, account: Account, angle: str, evidence: list[ResearchEv
 
 def pick_recipient(db: Session, account: Account) -> Contact | None:
     """Champion first for new outreach; once an opportunity is open, multi-thread to the buyer."""
-    has_open_opp = db.scalars(select(Opportunity.id).where(
-        Opportunity.account_id == account.id, Opportunity.stage.not_in(["closed_won", "closed_lost"]))).first()
-    order = (["economic_buyer", "executive_sponsor", "champion", "technical_evaluator"] if has_open_opp
-             else ["champion", "economic_buyer", "technical_evaluator", "executive_sponsor"])
+    has_open_opp = db.scalars(
+        select(Opportunity.id).where(
+            Opportunity.account_id == account.id, Opportunity.stage.not_in(["closed_won", "closed_lost"])
+        )
+    ).first()
+    order = (
+        ["economic_buyer", "executive_sponsor", "champion", "technical_evaluator"]
+        if has_open_opp
+        else ["champion", "economic_buyer", "technical_evaluator", "executive_sponsor"]
+    )
     for role in order:
-        r = db.scalars(select(AccountContactRole).where(AccountContactRole.account_id == account.id,
-                                                        AccountContactRole.role == role,
-                                                        AccountContactRole.rank == 1)).first()
+        r = db.scalars(
+            select(AccountContactRole).where(
+                AccountContactRole.account_id == account.id,
+                AccountContactRole.role == role,
+                AccountContactRole.rank == 1,
+            )
+        ).first()
         if r:
             c = db.get(Contact, r.contact_id)
             if c and not c.do_not_contact and c.email_status != "invalid":
@@ -75,13 +85,18 @@ def pick_recipient(db: Session, account: Account) -> Contact | None:
 
 def _engaged_champion(db: Session, account: Account, recipient: Contact) -> Contact | None:
     """The champion, if someone other than the recipient has already met with us (grounds a warm intro)."""
-    r = db.scalars(select(AccountContactRole).where(AccountContactRole.account_id == account.id,
-                                                    AccountContactRole.role == "champion",
-                                                    AccountContactRole.rank == 1)).first()
+    r = db.scalars(
+        select(AccountContactRole).where(
+            AccountContactRole.account_id == account.id,
+            AccountContactRole.role == "champion",
+            AccountContactRole.rank == 1,
+        )
+    ).first()
     if r is None or r.contact_id == recipient.id:
         return None
-    met = db.scalars(select(Activity.id).where(Activity.contact_id == r.contact_id,
-                                               Activity.type == "meeting_held")).first()
+    met = db.scalars(
+        select(Activity.id).where(Activity.contact_id == r.contact_id, Activity.type == "meeting_held")
+    ).first()
     return db.get(Contact, r.contact_id) if met else None
 
 

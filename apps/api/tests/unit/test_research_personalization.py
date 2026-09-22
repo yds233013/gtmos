@@ -104,7 +104,12 @@ def p_input(**kw):
     sig_ref = next(e.ref for e in out.evidence if e.record_id == "sig2")
     base = {
         "account": {"name": "Kestrel Analytics"},
-        "contact": {"first_name": "Priya", "name": "Priya Raman", "title": "Head of AI Platform", "email_status": "valid"},
+        "contact": {
+            "first_name": "Priya",
+            "name": "Priya Raman",
+            "title": "Head of AI Platform",
+            "email_status": "valid",
+        },
         "angle": "launch_reliability",
         "anchor_signal": {
             "id": "sig2",

@@ -45,7 +45,7 @@ from gtmos.services.workflow_engine import run_manual
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
-SORTS = {
+SORTS: dict[str, Any] = {
     "score": Account.icp_score.desc().nulls_last(),
     "intent": Account.intent_score.desc().nulls_last(),
     "recent_signal": Account.last_signal_at.desc().nulls_last(),
@@ -162,8 +162,13 @@ def list_accounts(
             }
         )
     _, icp = active_icp(db, ws.id)
-    return {"items": items, "total": total, "page": page.page, "page_size": page.page_size,
-            "category_max": icp.weights.as_dict()}
+    return {
+        "items": items,
+        "total": total,
+        "page": page.page,
+        "page_size": page.page_size,
+        "category_max": icp.weights.as_dict(),
+    }
 
 
 @router.get("/facets")
@@ -539,9 +544,7 @@ def research(
 
 class DraftBody(BaseModel):
     contact_id: str | None = None
-    channels: list[Literal["email", "linkedin", "call_prep"]] = Field(
-        default_factory=lambda: ["email", "linkedin", "call_prep"]
-    )
+    channels: list[Literal["email", "linkedin", "call_prep"]] = Field(default=["email", "linkedin", "call_prep"])
 
 
 @router.post("/{account_id}/drafts")

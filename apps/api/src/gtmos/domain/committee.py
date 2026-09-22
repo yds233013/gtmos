@@ -222,8 +222,8 @@ def infer_committee(
         else:
             unfilled.append(role)
             continue
-        for i, c in enumerate(others[:2], start=2):
+        for i, cand in enumerate(others[:2], start=2):
             assignments.append(
-                RoleAssignment(role, c.contact_id, i, c.score, _confidence(c.score, None) * 0.8, c.reasons)
+                RoleAssignment(role, cand.contact_id, i, cand.score, _confidence(cand.score, None) * 0.8, cand.reasons)
             )
     return CommitteeResult(assignments, unfilled, by_role)

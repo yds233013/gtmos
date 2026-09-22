@@ -16,6 +16,14 @@ os.environ["ENV"] = "test"
 os.environ["QUEUE_BACKEND"] = "inline"
 os.environ["SEED_ACCOUNTS"] = "150"
 # Never let a developer's shell credentials reach tests.
-for var in ("ANTHROPIC_API_KEY", "HUBSPOT_ACCESS_TOKEN", "APOLLO_API_KEY", "ADMIN_API_TOKEN", "WEBHOOK_SECRET",
-            "LLM_ENABLED", "HUBSPOT_LIVE_WRITES_ENABLED", "REDIS_URL"):
+for var in (
+    "ANTHROPIC_API_KEY",
+    "HUBSPOT_ACCESS_TOKEN",
+    "APOLLO_API_KEY",
+    "ADMIN_API_TOKEN",
+    "WEBHOOK_SECRET",
+    "LLM_ENABLED",
+    "HUBSPOT_LIVE_WRITES_ENABLED",
+    "REDIS_URL",
+):
     os.environ.pop(var, None)

@@ -155,14 +155,20 @@ def compare(
         why = f"Fewer than {min_events} events in an arm; the normal approximation is unreliable."
     elif p >= alpha or lo <= 0 <= hi:
         verdict = "no_significant_difference"
-        why = (f"p = {p:.3f}; the 95% CI for the difference ({lo * 100:+.1f} to {hi * 100:+.1f} pp) includes zero. "
-               "We cannot reject H0.")
+        why = (
+            f"p = {p:.3f}; the 95% CI for the difference ({lo * 100:+.1f} to {hi * 100:+.1f} pp) includes zero. "
+            "We cannot reject H0."
+        )
     elif abs_lift > 0:
         verdict = "treatment_better"
-        why = (f"Treatment beats control by {abs_lift * 100:+.1f} pp (95% CI {lo * 100:+.1f} to {hi * 100:+.1f} pp, "
-               f"p = {p:.3f}). Reject H0.")
+        why = (
+            f"Treatment beats control by {abs_lift * 100:+.1f} pp (95% CI {lo * 100:+.1f} to {hi * 100:+.1f} pp, "
+            f"p = {p:.3f}). Reject H0."
+        )
     else:
         verdict = "control_better"
-        why = (f"Control beats treatment by {-abs_lift * 100:.1f} pp (95% CI {lo * 100:+.1f} to {hi * 100:+.1f} pp, "
-               f"p = {p:.3f}).")
+        why = (
+            f"Control beats treatment by {-abs_lift * 100:.1f} pp (95% CI {lo * 100:+.1f} to {hi * 100:+.1f} pp, "
+            f"p = {p:.3f})."
+        )
     return ComparisonResult(c, t, abs_lift, rel, lo, hi, z, p, verdict, why, req)

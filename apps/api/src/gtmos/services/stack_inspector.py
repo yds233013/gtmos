@@ -141,7 +141,8 @@ def inspect(db: Session, ws: uuid.UUID) -> dict[str, Any]:
                 "title": "Schedule the enrichment waterfall for incomplete accounts",
                 "impact_accounts": missing_core,
                 "priority_accounts": dq_open.get("missing_employee_count", 0),
-                "why": f"{missing_core} accounts lack at least one core field ({', '.join(k for k, v in field_cov.items() if v < 1)}); "
+                "why": f"{missing_core} accounts lack at least one core field "
+                f"({', '.join(k for k, v in field_cov.items() if v < 1)}); "
                 f"{stale} scored accounts have enrichment older than 180 days.",
                 "how": "Nightly workflow: accounts with missing core fields or stale enrichment → enrich_account → "
                 "recalculate_score. The waterfall already falls back across providers.",
@@ -238,7 +239,8 @@ def inspect(db: Session, ws: uuid.UUID) -> dict[str, Any]:
                 "title": "Reassign accounts owned by inactive reps",
                 "impact_accounts": n,
                 "priority_accounts": n,
-                "why": f"{n} open accounts are owned by deactivated users ({', '.join(u['name'] for u in inactive_owned)}).",
+                "why": f"{n} open accounts are owned by deactivated users "
+                f"({', '.join(u['name'] for u in inactive_owned)}).",
                 "how": "Re-run routing for those accounts; the engine reassigns when the owner is inactive.",
                 "evidence": {"inactive_owners": {u["name"]: u["open_accounts"] for u in inactive_owned}},
             }
@@ -408,8 +410,8 @@ def inspect(db: Session, ws: uuid.UUID) -> dict[str, Any]:
                 "title": "Act on fresh buying signals automatically",
                 "impact_accounts": untouched,
                 "priority_accounts": untouched,
-                "why": f"{untouched} A/B accounts had a funding, launch, executive or hiring signal in the last 14 days "
-                "with no outreach since.",
+                "why": f"{untouched} A/B accounts had a funding, launch, executive or hiring signal in the "
+                "last 14 days with no outreach since.",
                 "how": "The 'Funding signal → research → outreach draft' workflow drafts evidence-grounded outreach "
                 "into the approval queue within minutes of the signal.",
                 "evidence": {"ab_accounts_with_fresh_signals": len(hot), "no_touch_since_signal": untouched},

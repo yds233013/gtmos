@@ -898,7 +898,7 @@ def _signal(
 
 def _recent(rng: random.Random, span: float, lo: float = 1.0, skew: float = 1.6) -> float:
     """A negative day offset skewed toward the recent past (signals cluster around active periods)."""
-    return -max(lo, span * rng.random() ** skew)
+    return -max(lo, span * float(rng.random() ** skew))
 
 
 def _signals_for(c: Ctx, a: Account, p: CompanyProfile) -> None:
@@ -1623,7 +1623,7 @@ def _flagship(c: Ctx, a: Account) -> None:
             account_id=a.id,
             first_name="Priya",
             last_name="Raman",
-            email=f" Priya.Raman@{a.domain.upper()}",
+            email=f" Priya.Raman@{(a.domain or '').upper()}",
             email_status="unknown",
             title="Head of AI",
             seniority="director",
@@ -1635,7 +1635,10 @@ def _flagship(c: Ctx, a: Account) -> None:
         )
     )
     ct = {x.first_name: x for x in c.contacts[a.id] if x.email and not x.email.startswith(" ")}
-    S = lambda *args, **kw: _signal(c, a, *args, **kw)  # noqa: E731
+
+    def S(*args: Any, **kw: Any) -> dict[str, Any]:
+        return _signal(c, a, *args, **kw)
+
     S(
         "tech_adoption",
         -45,
@@ -1845,7 +1848,7 @@ def _inject_defects(c: Ctx) -> dict[str, int]:
             id=uid("account", f"dup:{src.domain}"),
             workspace_id=c.ws.id,
             name=src.name.upper(),
-            domain=f"WWW.{src.domain.upper()}",
+            domain=f"WWW.{(src.domain or '').upper()}",
             industry=src.industry,
             country=src.country,
             region=src.region,
@@ -1925,20 +1928,20 @@ def _inject_defects(c: Ctx) -> dict[str, int]:
     cpicks = rng.sample(all_contacts, 80)
     cit = iter(cpicks)
     for _ in range(12):  # same email, different case/whitespace
-        src = next(cit)
-        acct = next(a for a in c.accounts if a.id == src.account_id)
+        csrc = next(cit)
+        acct = next(a for a in c.accounts if a.id == csrc.account_id)
         c.contacts[acct.id].append(
             Contact(
-                id=uid("contact", f"dup:{src.id}"),
+                id=uid("contact", f"dup:{csrc.id}"),
                 workspace_id=c.ws.id,
-                account_id=src.account_id,
-                first_name=src.first_name,
-                last_name=src.last_name,
-                email=f"  {(src.email or '').upper()} ",
+                account_id=csrc.account_id,
+                first_name=csrc.first_name,
+                last_name=csrc.last_name,
+                email=f"  {(csrc.email or '').upper()} ",
                 email_status="unknown",
-                title=src.title,
-                seniority=src.seniority,
-                department=src.department,
+                title=csrc.title,
+                seniority=csrc.seniority,
+                department=csrc.department,
                 lifecycle_stage="lead",
                 source="demo_seed:list_import",
                 data_origin="demo",
@@ -1947,21 +1950,21 @@ def _inject_defects(c: Ctx) -> dict[str, int]:
         )
         counts["duplicate_contact"] += 1
     for _ in range(5):  # same person, alias email
-        src = next(cit)
-        acct = next(a for a in c.accounts if a.id == src.account_id)
-        alias = f"{(src.first_name or 'x')[0]}{src.last_name}@{acct.domain or 'unknown.example'}".lower()
+        csrc = next(cit)
+        acct = next(a for a in c.accounts if a.id == csrc.account_id)
+        alias = f"{(csrc.first_name or 'x')[0]}{csrc.last_name}@{acct.domain or 'unknown.example'}".lower()
         c.contacts[acct.id].append(
             Contact(
-                id=uid("contact", f"alias:{src.id}"),
+                id=uid("contact", f"alias:{csrc.id}"),
                 workspace_id=c.ws.id,
-                account_id=src.account_id,
-                first_name=src.first_name,
-                last_name=src.last_name,
+                account_id=csrc.account_id,
+                first_name=csrc.first_name,
+                last_name=csrc.last_name,
                 email=alias,
                 email_status="unknown",
-                title=src.title,
-                seniority=src.seniority,
-                department=src.department,
+                title=csrc.title,
+                seniority=csrc.seniority,
+                department=csrc.department,
                 lifecycle_stage="lead",
                 source="demo_seed:event_scan",
                 data_origin="demo",
@@ -2129,20 +2132,38 @@ def _workflow_history(c: Ctx) -> None:
         steps = wf.definition["steps"]
         for a, s in items:
             created = s["observed_at"] + timedelta(minutes=rng.uniform(1, 30))
-            ctx = {"account": {"icp_score": a.icp_score, "score_grade": a.score_grade, "segment": a.segment,
-                               "is_customer": a.is_customer}}
-            passes, cond_results = evaluate_all([Condition.model_validate(x) for x in wf.definition["conditions"]],
-                                                ctx)
+            ctx = {
+                "account": {
+                    "icp_score": a.icp_score,
+                    "score_grade": a.score_grade,
+                    "segment": a.segment,
+                    "is_customer": a.is_customer,
+                }
+            }
+            passes, cond_results = evaluate_all([Condition.model_validate(x) for x in wf.definition["conditions"]], ctx)
             run = WorkflowRun(
-                workspace_id=c.ws.id, workflow_id=wf.id, workflow_version=1, account_id=a.id,
-                trigger_event={"type": wf.trigger_type, "event_id": str(s["id"]), "synthetic_history": True,
-                               "signal": {"id": str(s["id"]), "signal_type": s["signal_type"], "title": s["title"]}},
-                idempotency_key=f"wf:{wf_key}:v1:{wf.trigger_type}:{s['id']}", correlation_id=uuid.uuid4().hex[:16],
-                status="succeeded" if passes else "skipped", condition_results=jsonable(cond_results),
-                created_at=created, started_at=created, finished_at=created + timedelta(seconds=rng.uniform(2, 20)),
+                workspace_id=c.ws.id,
+                workflow_id=wf.id,
+                workflow_version=1,
+                account_id=a.id,
+                trigger_event={
+                    "type": wf.trigger_type,
+                    "event_id": str(s["id"]),
+                    "synthetic_history": True,
+                    "signal": {"id": str(s["id"]), "signal_type": s["signal_type"], "title": s["title"]},
+                },
+                idempotency_key=f"wf:{wf_key}:v1:{wf.trigger_type}:{s['id']}",
+                correlation_id=uuid.uuid4().hex[:16],
+                status="succeeded" if passes else "skipped",
+                condition_results=jsonable(cond_results),
+                created_at=created,
+                started_at=created,
+                finished_at=created + timedelta(seconds=rng.uniform(2, 20)),
                 data_origin="demo",
-                error=None if passes else "Conditions not met: " + "; ".join(
-                    r["condition"] for r in cond_results if not r["passed"]))
+                error=None
+                if passes
+                else "Conditions not met: " + "; ".join(r["condition"] for r in cond_results if not r["passed"]),
+            )
             r = rng.random()
             fail_at = None
             step_keys = [x["key"] for x in steps]
@@ -2350,6 +2371,22 @@ def seed(
     top = sorted((a for a in live_accounts if a.domain and not a.is_customer), key=lambda a: -(a.icp_score or 0))[:8]
     for a in [flagship, *[t for t in top if t.id != flagship.id]]:
         generate_research(db, a, actor="seed", use_llm=False)
+
+    # Fill the approval queue with drafts produced by the real personalization engine (never sent).
+    from gtmos.services.outreach_service import draft_outreach, pick_recipient
+
+    hot = sorted(
+        (
+            a
+            for a in live_accounts
+            if a.score_grade in ("A", "B") and not a.is_customer and not a.is_flagship and a.domain
+        ),
+        key=lambda a: -(a.intent_score or 0),
+    )[:8]
+    for a in hot:
+        contact = pick_recipient(db, a)
+        if contact is not None:
+            draft_outreach(db, a, contact, channels=["email", "linkedin"], actor="seed", initial_status="review")
 
     # Execute the real workflow engine on the most recent signals so the approval queue, routing log and
     # simulated CRM sync contain genuinely produced records.

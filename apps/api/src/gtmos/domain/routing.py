@@ -105,7 +105,7 @@ def route(
     ]
     conflicts: list[dict[str, Any]] = []
     for loser, _ in matched[1:]:
-        entry = {
+        entry: dict[str, Any] = {
             "rule": loser.key,
             "name": loser.name,
             "destination": loser.destination,

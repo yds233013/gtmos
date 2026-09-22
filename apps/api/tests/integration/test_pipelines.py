@@ -27,9 +27,15 @@ from gtmos.services.crm_sync import run_company_sync
 
 
 def _signal_payload(domain: str, ref: str, **kw):
-    return {"account_domain": domain, "signal_type": kw.get("signal_type", "funding_round"),
-            "title": kw.get("title", "Raised $50M Series B"), "explanation": "Raised a $50M Series B.",
-            "source": "test_feed", "source_ref": ref, "confidence": 0.95}
+    return {
+        "account_domain": domain,
+        "signal_type": kw.get("signal_type", "funding_round"),
+        "title": kw.get("title", "Raised $50M Series B"),
+        "explanation": "Raised a $50M Series B.",
+        "source": "test_feed",
+        "source_ref": ref,
+        "confidence": 0.95,
+    }
 
 
 def test_signal_ingestion_dedupes_rescores_and_triggers_workflow(client, flagship, db):
@@ -71,14 +77,18 @@ def test_transient_failures_retry_then_dead_letter_then_manual_retry(db, flagshi
         raise workflow_engine.TransientError("503 upstream (test)")
 
     monkeypatch.setitem(workflow_engine.ACTION_HANDLERS, "sync_crm", flaky)
-    wf = db.scalars(select(Workflow).where(Workflow.workspace_id == ws.id, Workflow.key == "score-threshold-routing")).one()
+    wf = db.scalars(
+        select(Workflow).where(Workflow.workspace_id == ws.id, Workflow.key == "score-threshold-routing")
+    ).one()
     run = workflow_engine.run_manual(db, wf, flagship, "tester@example.com")
     assert run.status == "dead_letter"
-    crm = db.scalars(select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id,
-                                                   WorkflowStepRun.step_key == "crm")).one()
+    crm = db.scalars(
+        select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id, WorkflowStepRun.step_key == "crm")
+    ).one()
     assert crm.attempts == crm.max_attempts == calls["n"]
-    earlier = db.scalars(select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id,
-                                                       WorkflowStepRun.step_key == "route")).one()
+    earlier = db.scalars(
+        select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id, WorkflowStepRun.step_key == "route")
+    ).one()
     assert earlier.status == "succeeded"
     monkeypatch.undo()
     workflow_engine.retry_run(db, run)
@@ -88,8 +98,9 @@ def test_transient_failures_retry_then_dead_letter_then_manual_retry(db, flagshi
 
 
 def test_workflow_conditions_skip_run_with_reasons(db, ws):
-    wf = db.scalars(select(Workflow).where(Workflow.workspace_id == ws.id,
-                                           Workflow.key == "funding-signal-to-outreach")).one()
+    wf = db.scalars(
+        select(Workflow).where(Workflow.workspace_id == ws.id, Workflow.key == "funding-signal-to-outreach")
+    ).one()
     low = db.scalars(select(Account).where(Account.workspace_id == ws.id, Account.icp_score < 40)).first()
     run = workflow_engine.run_manual(db, wf, low, "tester@example.com")
     assert run.status == "skipped"
@@ -97,8 +108,12 @@ def test_workflow_conditions_skip_run_with_reasons(db, ws):
 
 
 def _posthog(domain: str, email: str, event: str, uid: str | None = None):
-    return {"event": event, "distinct_id": email, "uuid": uid or str(uuid.uuid4()),
-            "properties": {"$groups": {"company": domain}, "email": email}}
+    return {
+        "event": event,
+        "distinct_id": email,
+        "uuid": uid or str(uuid.uuid4()),
+        "properties": {"$groups": {"company": domain}, "email": email},
+    }
 
 
 def test_posthog_webhook_pql_flow_and_duplicate_delivery(client, db, flagship):
@@ -128,15 +143,27 @@ def test_webhook_signature_required_when_secret_configured(client, flagship, mon
         unsigned = client.post("/api/v1/webhooks/n8n", content=payload, headers={"content-type": "application/json"})
         assert unsigned.status_code == 401
         ts = str(int(time.time()))
-        signed = client.post("/api/v1/webhooks/n8n", content=payload, headers={
-            "content-type": "application/json", "X-GTMOS-Timestamp": ts,
-            "X-GTMOS-Signature": sign_gtmos("s3cret", ts, payload)})
+        signed = client.post(
+            "/api/v1/webhooks/n8n",
+            content=payload,
+            headers={
+                "content-type": "application/json",
+                "X-GTMOS-Timestamp": ts,
+                "X-GTMOS-Signature": sign_gtmos("s3cret", ts, payload),
+            },
+        )
         assert signed.status_code == 200, signed.text
         assert signed.json()["signature"] == "valid"
         stale = str(int(time.time()) - 3600)
-        replay = client.post("/api/v1/webhooks/n8n", content=payload.replace(b"test_feed", b"test_feed2"), headers={
-            "content-type": "application/json", "X-GTMOS-Timestamp": stale,
-            "X-GTMOS-Signature": sign_gtmos("s3cret", stale, payload.replace(b"test_feed", b"test_feed2"))})
+        replay = client.post(
+            "/api/v1/webhooks/n8n",
+            content=payload.replace(b"test_feed", b"test_feed2"),
+            headers={
+                "content-type": "application/json",
+                "X-GTMOS-Timestamp": stale,
+                "X-GTMOS-Signature": sign_gtmos("s3cret", stale, payload.replace(b"test_feed", b"test_feed2")),
+            },
+        )
         assert replay.status_code == 401
     finally:
         monkeypatch.delenv("WEBHOOK_SECRET")
@@ -167,20 +194,32 @@ def test_crm_sync_retries_transient_failures(db, ws):
             return n == 1
 
     synced = select(ExternalRecord.internal_id)
-    target = db.scalars(select(Account).where(Account.workspace_id == ws.id, Account.domain.is_not(None),
-                                              Account.id.not_in(synced))).first()
+    target = db.scalars(
+        select(Account).where(Account.workspace_id == ws.id, Account.domain.is_not(None), Account.id.not_in(synced))
+    ).first()
     s = run_company_sync(db, ws.id, [target.id], adapter=AlwaysFailFirst(db, ws.id), job="test")
     assert s.status == "succeeded" and s.retries == 1
 
 
 def test_data_quality_detects_seeded_defects_and_merges_duplicates(db, ws):
     out = data_quality.scan(db, ws.id, write_audit=False)
-    for rule in ("duplicate_contact", "duplicate_account", "missing_domain", "invalid_email", "orphan_contact",
-                 "bad_external_id", "missing_employee_count"):
+    for rule in (
+        "duplicate_contact",
+        "duplicate_account",
+        "missing_domain",
+        "invalid_email",
+        "orphan_contact",
+        "bad_external_id",
+        "missing_employee_count",
+    ):
         assert out["open_by_rule"].get(rule, 0) > 0, rule
-    issue = db.scalars(select(DataQualityIssue).where(DataQualityIssue.workspace_id == ws.id,
-                                                      DataQualityIssue.rule_key == "duplicate_contact",
-                                                      DataQualityIssue.status == "open")).first()
+    issue = db.scalars(
+        select(DataQualityIssue).where(
+            DataQualityIssue.workspace_id == ws.id,
+            DataQualityIssue.rule_key == "duplicate_contact",
+            DataQualityIssue.status == "open",
+        )
+    ).first()
     dup_ids = issue.suggested_fix["params"]["duplicate_ids"]
     data_quality.remediate(db, issue, "tester@example.com")
     assert issue.status == "resolved"
@@ -192,21 +231,52 @@ def test_data_quality_detects_seeded_defects_and_merges_duplicates(db, ws):
 
 def test_manual_issue_cannot_be_auto_remediated(client, db, ws):
     data_quality.scan(db, ws.id, write_audit=False)
-    issue = db.scalars(select(DataQualityIssue).where(DataQualityIssue.workspace_id == ws.id,
-                                                      DataQualityIssue.rule_key == "missing_domain")).first()
+    issue = db.scalars(
+        select(DataQualityIssue).where(
+            DataQualityIssue.workspace_id == ws.id, DataQualityIssue.rule_key == "missing_domain"
+        )
+    ).first()
     r = client.post(f"/api/v1/data-quality/issues/{issue.id}/remediate")
     assert r.status_code == 409
 
 
-@pytest.mark.parametrize("path", [
-    "/analytics/overview", "/analytics/funnel", "/analytics/breakdown?dimension=campaign", "/analytics/pipeline-trend",
-    "/analytics/velocity", "/analytics/stuck", "/analytics/score-validation", "/analytics/signal-correlation",
-    "/analytics/attribution", "/analytics/period-comparison", "/campaigns", "/experiments", "/stack-inspector",
-    "/operations", "/audit", "/workflows", "/workflow-runs?include_synthetic=false", "/routing/rules",
-    "/routing/decisions?conflicts_only=true", "/integrations", "/integrations/hubspot/reverse-etl/preview",
-    "/integrations/hubspot/simulated-objects?q=a", "/signals", "/drafts", "/contacts", "/opportunities",
-    "/activities", "/users", "/enrichment/runs", "/webhooks/events", "/data-quality", "/data-quality/issues",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/analytics/overview",
+        "/analytics/funnel",
+        "/analytics/breakdown?dimension=campaign",
+        "/analytics/pipeline-trend",
+        "/analytics/velocity",
+        "/analytics/stuck",
+        "/analytics/score-validation",
+        "/analytics/signal-correlation",
+        "/analytics/attribution",
+        "/analytics/period-comparison",
+        "/campaigns",
+        "/experiments",
+        "/stack-inspector",
+        "/operations",
+        "/audit",
+        "/workflows",
+        "/workflow-runs?include_synthetic=false",
+        "/routing/rules",
+        "/routing/decisions?conflicts_only=true",
+        "/integrations",
+        "/integrations/hubspot/reverse-etl/preview",
+        "/integrations/hubspot/simulated-objects?q=a",
+        "/signals",
+        "/drafts",
+        "/contacts",
+        "/opportunities",
+        "/activities",
+        "/users",
+        "/enrichment/runs",
+        "/webhooks/events",
+        "/data-quality",
+        "/data-quality/issues",
+    ],
+)
 def test_read_endpoints_return_200(client, path):
     r = client.get(f"/api/v1{path}")
     assert r.status_code == 200, (path, r.text[:300])
@@ -223,23 +293,37 @@ def test_experiment_results_are_statistically_sane(client):
     for v in e["variants"]:
         m = v["metrics"]["positive_reply"]
         assert m["ci_low"] <= m["rate"] <= m["ci_high"]
-    assert e["verdict"] in {"insufficient_sample", "insufficient_events", "no_significant_difference",
-                            "treatment_better", "control_better"}
+    assert e["verdict"] in {
+        "insufficient_sample",
+        "insufficient_events",
+        "no_significant_difference",
+        "treatment_better",
+        "control_better",
+    }
 
 
 def test_copilot_routes_to_approved_metrics_only(client):
-    for q, intent in [("Why did pipeline fall?", "pipeline_change"),
-                      ("Which segment has the highest meeting conversion?", "segment_conversion"),
-                      ("Which signals correlate with opportunities?", "signal_correlation"),
-                      ("Where are accounts getting stuck?", "stuck"),
-                      ("What should the GTM team investigate?", "investigate")]:
+    for q, intent in [
+        ("Why did pipeline fall?", "pipeline_change"),
+        ("Which segment has the highest meeting conversion?", "segment_conversion"),
+        ("Which signals correlate with opportunities?", "signal_correlation"),
+        ("Where are accounts getting stuck?", "stuck"),
+        ("What should the GTM team investigate?", "investigate"),
+    ]:
         r = client.post("/api/v1/copilot/ask", json={"question": q}).json()
         assert r["intent"] == intent, q
         assert r["queries"] and r["answer"]
     evil = client.post("/api/v1/copilot/ask", json={"question": "DROP TABLE accounts; select * from users"}).json()
     assert evil["generator"] == "deterministic" and evil["queries"][0]["metric"] in {
-        "stack_inspector", "breakdown", "period_comparison", "funnel", "signal_correlation", "experiments",
-        "attribution", "velocity"}
+        "stack_inspector",
+        "breakdown",
+        "period_comparison",
+        "funnel",
+        "signal_correlation",
+        "experiments",
+        "attribution",
+        "velocity",
+    }
 
 
 def test_stack_inspector_evidence_is_traceable(client):
@@ -264,6 +348,10 @@ def test_admin_token_gates_icp_changes(client, monkeypatch):
 
 
 def test_signals_are_unique_per_workspace(db, ws):
-    dupes = db.execute(select(Signal.dedupe_key, func.count()).where(Signal.workspace_id == ws.id)
-                       .group_by(Signal.dedupe_key).having(func.count() > 1)).all()
+    dupes = db.execute(
+        select(Signal.dedupe_key, func.count())
+        .where(Signal.workspace_id == ws.id)
+        .group_by(Signal.dedupe_key)
+        .having(func.count() > 1)
+    ).all()
     assert dupes == []

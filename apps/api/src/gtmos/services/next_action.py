@@ -54,8 +54,9 @@ def load_action_facts(db: Session, account_ids: list[uuid.UUID], now: datetime) 
         .order_by(Opportunity.opened_at)
     ).tuples():
         f.open_opp[acc] = name
-    f.last_touch = dict(
-        db.execute(
+    f.last_touch = {
+        k: v
+        for k, v in db.execute(
             select(Activity.account_id, func.max(Activity.occurred_at))
             .where(
                 Activity.account_id.in_(account_ids),
@@ -66,7 +67,8 @@ def load_action_facts(db: Session, account_ids: list[uuid.UUID], now: datetime) 
         )
         .tuples()
         .all()
-    )
+        if k is not None
+    }
     roles = db.execute(
         select(AccountContactRole.account_id, AccountContactRole.role, Contact.first_name, Contact.last_name)
         .join(Contact, Contact.id == AccountContactRole.contact_id)

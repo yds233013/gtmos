@@ -656,7 +656,7 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
     elif action == "suppress_email":
         c = db.get(Contact, uuid.UUID(p["contact_id"]))
         if c:
-            before = {"email_status": c.email_status, "do_not_contact": c.do_not_contact}
+            prev_state = {"email_status": c.email_status, "do_not_contact": c.do_not_contact}
             c.email_status = "invalid"
             c.do_not_contact = True
             audit(
@@ -665,7 +665,7 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
                 "contact.email_suppressed",
                 "contact",
                 c.id,
-                before=before,
+                before=prev_state,
                 after={"email_status": "invalid", "do_not_contact": True},
                 actor=actor,
             )
@@ -690,7 +690,7 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
         if "account_id" in p:
             a = db.get(Account, uuid.UUID(p["account_id"]))
             if a:
-                before = a.lifecycle_stage
+                prev_lc = a.lifecycle_stage
                 a.lifecycle_stage = "customer" if a.is_customer else (FUNNEL_TO_LIFECYCLE.get(a.funnel_stage) or "lead")
                 audit(
                     db,
@@ -698,14 +698,14 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
                     "account.lifecycle_aligned",
                     "account",
                     a.id,
-                    before={"lifecycle_stage": before},
+                    before={"lifecycle_stage": prev_lc},
                     after={"lifecycle_stage": a.lifecycle_stage},
                     actor=actor,
                 )
         else:
             c = db.get(Contact, uuid.UUID(p["contact_id"]))
             if c:
-                before = c.lifecycle_stage
+                prev_contact_lc = c.lifecycle_stage
                 c.lifecycle_stage = "salesqualifiedlead"
                 audit(
                     db,
@@ -713,14 +713,14 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
                     "contact.lifecycle_aligned",
                     "contact",
                     c.id,
-                    before={"lifecycle_stage": before},
+                    before={"lifecycle_stage": prev_contact_lc},
                     after={"lifecycle_stage": c.lifecycle_stage},
                     actor=actor,
                 )
     elif action == "clear_external_id":
         a = db.get(Account, uuid.UUID(p["account_id"]))
         if a:
-            before = a.hubspot_company_id
+            prev_ext = a.hubspot_company_id
             a.hubspot_company_id = None
             audit(
                 db,
@@ -728,7 +728,7 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
                 "account.external_id_cleared",
                 "account",
                 a.id,
-                before={"hubspot_company_id": before},
+                before={"hubspot_company_id": prev_ext},
                 after={"hubspot_company_id": None},
                 actor=actor,
             )
@@ -736,10 +736,10 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
         from gtmos.domain.matching import email_domain
 
         c = db.get(Contact, uuid.UUID(p["contact_id"]))
-        d = email_domain(c.email) if c else None
+        dom = email_domain(c.email) if c else None
         acct = (
-            db.scalars(select(Account).where(Account.workspace_id == issue.workspace_id, Account.domain == d)).first()
-            if d
+            db.scalars(select(Account).where(Account.workspace_id == issue.workspace_id, Account.domain == dom)).first()
+            if dom
             else None
         )
         if c is None or acct is None:
@@ -752,7 +752,7 @@ def remediate(db: Session, issue: DataQualityIssue, actor: str) -> dict[str, Any
             "contact",
             c.id,
             after={"account_id": str(acct.id)},
-            reason=f"email domain {d}",
+            reason=f"email domain {dom}",
             actor=actor,
         )
         result["account"] = acct.name

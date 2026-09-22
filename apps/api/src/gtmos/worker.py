@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from gtmos.config import get_settings
 
@@ -22,7 +23,7 @@ log = logging.getLogger("gtmos.worker")
 QUEUE_NAME = "gtmos-workflows"
 
 
-def _queue():  # type: ignore[no-untyped-def]
+def _queue() -> Any:
     from redis import Redis
     from rq import Queue
 

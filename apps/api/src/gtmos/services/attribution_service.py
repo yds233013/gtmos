@@ -50,7 +50,7 @@ def run(db: Session, ws: uuid.UUID, days: int = 180) -> dict[str, Any]:
     touches_by_opp = {oid: touches_by_acct[acc] for acc, oids in acct_opps.items() for oid in oids}
     results = {m: attribute(m, facts, touches_by_opp) for m in MODELS}
     keys = sorted({k for r in results.values() for k in r.pipeline_by_key})
-    table = [
+    table: list[dict[str, Any]] = [
         {
             "key": k,
             **{m: results[m].pipeline_by_key.get(k, 0.0) for m in MODELS},

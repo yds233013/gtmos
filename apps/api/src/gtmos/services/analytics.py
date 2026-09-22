@@ -224,14 +224,14 @@ def breakdown(db: Session, ws: uuid.UUID, dimension: str, days: int = 180) -> di
         ).all()
         keys = {r[0]: r[1] for r in rows}
     elif dimension == "persona":
-        rows = db.execute(
+        prow = db.execute(
             select(Activity.account_id, Contact.department)
             .join(Contact, Contact.id == Activity.contact_id)
             .where(Activity.workspace_id == ws, Activity.type == "email_sent", Activity.occurred_at >= since)
             .distinct(Activity.account_id)
             .order_by(Activity.account_id, Activity.occurred_at)
         ).all()
-        keys = {r[0]: (r[1] or "unknown") for r in rows}
+        keys = {r[0]: (r[1] or "unknown") for r in prow if r[0] is not None}
     else:
         col = getattr(Account, dimension)
         keys = {
@@ -258,7 +258,7 @@ def breakdown(db: Session, ws: uuid.UUID, dimension: str, days: int = 180) -> di
         g["opportunities"] += 1 if eid in opp_amount else 0
         g["pipeline"] += opp_amount.get(eid, 0.0)
         g["won"] += 1 if "won" in s else 0
-    out = []
+    out: list[dict[str, Any]] = []
     for k, g in agg.items():
         n = g["contacted"]
         out.append(
@@ -336,7 +336,7 @@ def period_comparison(db: Session, ws: uuid.UUID, days: int = 28) -> dict[str, A
 
     cur, prev = by_campaign(cur_start, now), by_campaign(prev_start, cur_start)
     keys = sorted(set(cur) | set(prev))
-    rows = [
+    rows: list[dict[str, Any]] = [
         {
             "key": k,
             "current_count": cur.get(k, (0, 0))[0],
@@ -483,7 +483,7 @@ def stuck_accounts(db: Session, ws: uuid.UUID, limit: int = 50) -> dict[str, Any
     accounts = db.scalars(select(Account).where(_live(ws), Account.funnel_stage.in_(list(STUCK_RULES))))
     by_stage: dict[str, int] = defaultdict(int)
     unowned: dict[str, int] = defaultdict(int)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for a in accounts:
         since = last_at.get(a.id)
         if since is None:
@@ -549,7 +549,7 @@ def signal_correlation(db: Session, ws: uuid.UUID, days: int = 180) -> dict[str,
     ):
         if acc in contacted:
             sig_accounts[st].add(acc)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for st, accs in sig_accounts.items():
         n = len(accs)
         opp = len(accs & with_opp)
