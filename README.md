@@ -217,7 +217,7 @@ make check          # everything above + production web build
 | Suite | Count | What it covers |
 |---|---|---|
 | Backend unit (pytest) | 57 | Scoring, waterfall, routing conflicts, committee, experiments and attribution math, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures |
-| Backend integration (pytest + Postgres) | 66 | API contracts, signal → workflow → draft → CRM, idempotency, retries → dead letter → resume, signed webhooks and replay protection, PQL flow, reverse-ETL idempotency, data quality merges, copilot routing, admin-token gating |
+| Backend integration (pytest + Postgres) | 67 | API contracts, signal → workflow → draft → CRM, idempotency, retries → dead letter → resume, signed webhooks and replay protection, PQL flow, reverse-ETL idempotency, data quality merges, copilot routing, admin-token gating |
 | Frontend (Vitest + Testing Library) | 14 | Formatters, safe markdown (HTML injection), URL helpers, accessible meters, confirm-before-mutate, inline API errors |
 | E2E (Playwright, production build) | 22 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
 

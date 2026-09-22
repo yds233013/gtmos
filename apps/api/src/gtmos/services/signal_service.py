@@ -120,6 +120,7 @@ def ingest_signal(db: Session, account: Account, *, run_workflows: bool = True, 
                     "observed_at": sig.observed_at.isoformat(),
                 }
             },
+            data_origin=sig.data_origin,
         )
         if outcomes and outcomes[0].crossed_a_grade:
             runs += emit_event(

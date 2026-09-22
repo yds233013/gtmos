@@ -385,3 +385,22 @@ def test_failed_webhook_is_reprocessed_on_sender_retry(client, monkeypatch):
     assert first["status"] == "failed"
     second = client.post("/api/v1/webhooks/posthog", json=ev).json()
     assert second["status"] == "processed" and second["duplicate"] is False
+
+
+def test_reverse_etl_never_overwrites_crm_owned_fields(db, ws):
+    from gtmos.services.crm_sync import plan_company_sync
+
+    target = db.scalars(
+        select(Account).where(
+            Account.workspace_id == ws.id,
+            Account.domain.is_not(None),
+            Account.id.not_in(select(ExternalRecord.internal_id)),
+        )
+    ).first()
+    first = plan_company_sync(db, ws.id, [target], full_record=False).changes[0]
+    assert first.is_new and {"name", "domain"} <= set(first.properties)
+    run_company_sync(db, ws.id, [target.id], adapter=DemoHubSpotAdapter(db, ws.id, fail_transiently=False))
+    target.icp_score = (target.icp_score or 0) + 1  # a GTMOS-owned value changes
+    later = plan_company_sync(db, ws.id, [target], full_record=False).changes[0]
+    assert not later.is_new
+    assert all(k.startswith("gtmos_") for k in later.properties), later.properties

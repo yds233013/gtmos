@@ -1,24 +1,59 @@
 {
-  "name": "GTMOS · HubSpot company change → GTMOS rescore",
+  "name": "GTMOS \u00b7 HubSpot company change \u2192 GTMOS rescore",
   "nodes": [
     {
       "id": "5b1f7a2e-0004-4c3e-9a10-000000000001",
       "name": "HubSpot change webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "webhookId": "gtmos-hubspot-change",
-      "parameters": { "httpMethod": "POST", "path": "gtmos-hubspot-change", "responseMode": "onReceived", "options": {} }
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gtmos-hubspot-change",
+        "responseMode": "onReceived",
+        "options": {}
+      }
     },
     {
       "id": "5b1f7a2e-0004-4c3e-9a10-000000000002",
       "name": "Only fit-relevant properties",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, 0],
+      "position": [
+        240,
+        0
+      ],
       "parameters": {
         "language": "javaScript",
-        "jsCode": "// HubSpot sends batches of change events. Rescore only when a property that feeds the ICP score changed,\n// and never react to GTMOS's own gtmos_* writes (that would loop).\nconst relevant = new Set(['numberofemployees', 'industry', 'country', 'domain']);\nconst events = ($input.first().json.body ?? []).filter(e => relevant.has(e.propertyName));\nreturn events.map(e => ({ json: { gtmos_account_id: e.gtmos_account_id ?? null, domain: e.domain ?? null, objectId: e.objectId } }));"
+        "jsCode": "// HubSpot change events carry objectId + propertyName (no domain). Keep only properties that feed the\n// ICP score and ignore GTMOS's own gtmos_* writes, which would otherwise loop. Signature verification is\n// done by pointing HubSpot at GTMOS's /api/v1/webhooks/hubspot (v3 signatures); this template is the\n// low-code alternative for teams that route CRM events through n8n.\nconst relevant = new Set(['numberofemployees', 'industry', 'country', 'domain']);\nconst events = ($input.first().json.body ?? []).filter(e => relevant.has(e.propertyName));\nconst ids = [...new Set(events.map(e => e.objectId))];\nreturn ids.map(objectId => ({ json: { objectId } }));"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0004-4c3e-9a10-000000000005",
+      "name": "Get company from HubSpot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/companies/{{ $json.objectId }}?properties=domain,gtmos_account_id",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
       }
     },
     {
@@ -26,10 +61,13 @@
       "name": "Find GTMOS account",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 0],
+      "position": [
+        720,
+        0
+      ],
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/accounts?q={{ encodeURIComponent($json.domain) }}&page_size=1",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/accounts?q={{ encodeURIComponent($json.properties.domain) }}&page_size=1",
         "options": {}
       }
     },
@@ -38,7 +76,10 @@
       "name": "Rescore",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 0],
+      "position": [
+        960,
+        0
+      ],
       "parameters": {
         "method": "POST",
         "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/accounts/{{ $json.items[0].id }}/rescore",
@@ -47,10 +88,53 @@
     }
   ],
   "connections": {
-    "HubSpot change webhook": { "main": [[{ "node": "Only fit-relevant properties", "type": "main", "index": 0 }]] },
-    "Only fit-relevant properties": { "main": [[{ "node": "Find GTMOS account", "type": "main", "index": 0 }]] },
-    "Find GTMOS account": { "main": [[{ "node": "Rescore", "type": "main", "index": 0 }]] }
+    "HubSpot change webhook": {
+      "main": [
+        [
+          {
+            "node": "Only fit-relevant properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only fit-relevant properties": {
+      "main": [
+        [
+          {
+            "node": "Get company from HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get company from HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Find GTMOS account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find GTMOS account": {
+      "main": [
+        [
+          {
+            "node": "Rescore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "active": false
 }

@@ -95,6 +95,11 @@ services:
       - "5678:5678"
     environment:
       GTMOS_BASE_URL: http://api:8000
+      GTMOS_WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      GTMOS_ADMIN_TOKEN: ${ADMIN_API_TOKEN:-}
+      HUBSPOT_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"   # templates read $env (n8n 2.x blocks it by default)
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto     # template 01 signs requests with HMAC
     volumes:
       - n8ndata:/home/node/.n8n
 

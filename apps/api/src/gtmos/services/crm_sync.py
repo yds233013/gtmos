@@ -119,13 +119,17 @@ def plan_company_sync(db: Session, workspace_id: uuid.UUID, accounts: list[Accou
     actions = next_best_actions(db, accounts)
     for a in accounts:
         computed = _computed(a, lasts.get(a.id), actions[a.id].label)
-        props = (
-            company_properties(a, computed)
-            if full_record
-            else {k: v for k, v in {"domain": a.domain, "name": a.name, **computed}.items() if v is not None}
-        )
-        h = payload_hash(props)
         prev = ext.get(a.id)
+        # Field ownership: GTMOS owns gtmos_* properties. Name and domain are set only when the record is
+        # created, so a rep's edits in the CRM are never overwritten by a later reverse-ETL push.
+        owned = {k: v for k, v in computed.items() if v is not None}
+        if full_record:
+            props = company_properties(a, computed)
+        elif prev is None:
+            props = {k: v for k, v in {"domain": a.domain, "name": a.name, **owned}.items() if v is not None}
+        else:
+            props = owned
+        h = payload_hash(owned) if not full_record else payload_hash(props)
         if prev and prev.last_payload_hash == h:
             plan.unchanged += 1
             continue
@@ -158,6 +162,9 @@ def run_company_sync(
         q = q.where(Account.score_grade.in_(["A", "B", "C"]))  # only sync accounts reps should see
     accounts = list(db.scalars(q))
     plan = plan_company_sync(db, workspace_id, accounts, full_record)
+    ensure = getattr(adapter, "ensure_properties_once", None)
+    if callable(ensure) and plan.changes:
+        ensure()  # live adapter: create gtmos_* custom properties (incl. the unique id property) first
     sync = IntegrationSync(
         workspace_id=workspace_id,
         provider=adapter.provider,

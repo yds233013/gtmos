@@ -80,6 +80,8 @@ CUSTOM_PROPERTIES: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+PROPERTY_GROUPS = {"companies": "companyinformation", "contacts": "contactinformation", "deals": "dealinformation"}
+
 DEAL_STAGE_MAP = {
     "discovery": "appointmentscheduled",
     "evaluation": "qualifiedtobuy",
@@ -233,12 +235,19 @@ class RealHubSpotAdapter:
             return resp
         raise AssertionError("unreachable")
 
+    _properties_ensured = False
+
+    def ensure_properties_once(self) -> None:
+        if not RealHubSpotAdapter._properties_ensured:
+            self.ensure_properties()
+            RealHubSpotAdapter._properties_ensured = True
+
     def ensure_properties(self) -> list[str]:
         """Create GTMOS custom properties if missing. Returns names created. Requires schema scopes."""
         created: list[str] = []
         for obj, props in CUSTOM_PROPERTIES.items():
             for p in props:
-                resp = self._post(f"/crm/v3/properties/{obj}", {**p, "groupName": f"{obj[:-1]}information"})
+                resp = self._post(f"/crm/v3/properties/{obj}", {**p, "groupName": PROPERTY_GROUPS[obj]})
                 if resp.status_code in (200, 201):
                     created.append(f"{obj}.{p['name']}")
                 elif resp.status_code != 409:  # 409 = already exists

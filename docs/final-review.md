@@ -38,7 +38,7 @@ deterministic?*
   (protocols with demo and live implementations) → thin routes.
 - Idempotency is structural: unique keys on signals, workflow runs, webhook events and external records;
   savepoint-guarded run creation; payload hashing; side effects keyed by run id.
-- Tests exercise behavior rather than lines: 57 unit, 66 Postgres integration (each in a rolled-back
+- Tests exercise behavior rather than lines: 57 unit, 67 Postgres integration (each in a rolled-back
   transaction), 14 component, 22 E2E against the production build. mypy --strict, ruff, ESLint and tsc are clean.
 - Migrations apply from scratch and `alembic check` reports no drift.
 
@@ -58,6 +58,9 @@ deterministic?*
 | A webhook that failed processing was acked as a duplicate when the sender retried | doc review | failed events are reprocessed on redelivery; integration test |
 | A contact holding two committee roles appeared twice in the evidence pack | doc review | evidence keyed by record; unit test |
 | HubSpot v3 verifier accepted far-future timestamps | doc review | rejected beyond the 5-minute skew; unit test |
+| Reverse ETL re-sent `name`/`domain`, which could overwrite rep edits in HubSpot | doc review | updates carry only `gtmos_*` fields; integration test |
+| HubSpot property group built as `companieinformation`; custom properties never auto-created | doc review | explicit group map; `ensure_properties_once` before first live sync |
+| n8n template 04 read a domain HubSpot events don't carry; compose lacked n8n 2.x env settings | doc review | HubSpot lookup by objectId; env vars added; re-imported into n8n 2.40.5 |
 
 **Open findings**
 - Single-operator auth. Acceptable for a demo, documented; production needs OIDC + RBAC + row-level scoping.
