@@ -2183,11 +2183,12 @@ def _workflow_history(c: Ctx) -> None:
                 elif st["key"] == fail_at:
                     failed_seen = True
                     status = "failed"
-                    attempts = st.get("max_attempts", 3) if fail_at == "crm" else 1
+                    dead = run.status == "dead_letter"
+                    attempts = st.get("max_attempts", 3) if dead else 1
                     err = (
-                        "retries exhausted: 503 Service Unavailable (simulated)"
-                        if fail_at == "crm"
-                        else "ProviderError: all enrichment providers timed out (simulated)"
+                        f"retries exhausted: 503 Service Unavailable from {st['action']} (simulated)"
+                        if dead
+                        else f"ProviderError: upstream timeout in {st['action']} (simulated)"
                     )
                     run.error = f"step '{st['key']}': {err}"
                 elif st["key"] == "crm" and (a.is_flagship or rng.random() < 0.12):
