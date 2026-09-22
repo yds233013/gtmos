@@ -14,7 +14,7 @@ import { date, money, num, pct, titleCase } from "@/lib/format";
 import type { Funnel, PipelineTrend } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import type { Attribution, AttributionModel, OpportunityList, OwnerLoad, Stuck, Velocity } from "./types";
+import type { Attribution, AttributionModel, AttributionSpotlight, OpportunityList, OwnerLoad, Stuck, Velocity } from "./types";
 
 export const metadata = { title: "Pipeline" };
 
@@ -443,7 +443,93 @@ function AttributionPanel({ attribution: a, view }: { attribution: Attribution |
           </ul>
         </div>
       </div>
+      <Spotlight spotlight={a.spotlight} models={models} />
     </Panel>
+  );
+}
+
+/**
+ * One opportunity where the models genuinely disagree. The table above shows *that* attribution is a
+ * modelling choice; this shows *why*, on a single deal a rep would recognise.
+ */
+function Spotlight({ spotlight: s, models }: { spotlight: AttributionSpotlight | null; models: AttributionModel[] }) {
+  if (!s) return null;
+  const sources = Array.from(new Set(models.flatMap((m) => s.credit[m].map((c) => c.source))));
+  const shareOf = (m: AttributionModel, source: string) => s.credit[m].find((c) => c.source === source)?.share ?? 0;
+
+  return (
+    <section className="border-t border-border px-4 py-3" aria-labelledby="attr-spotlight">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 id="attr-spotlight" className="text-xs font-medium text-text">
+          Worked example: where the models disagree
+        </h3>
+        <Link href={`/accounts/${s.account_id}`} className="text-xs text-accent-text hover:underline">
+          {s.account ?? "Account"} · {money(s.amount)}
+          {s.won ? " · won" : ""}
+        </Link>
+      </div>
+      <p className="mt-0.5 text-[11px] text-muted">{s.opportunity}</p>
+
+      <ol className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[11px]" aria-label="Recorded touches before the opportunity opened">
+        {s.touches.map((t, i) => (
+          <li key={`${t.source}-${t.occurred_at}`} className="flex items-center gap-1.5">
+            {i > 0 && (
+              <span className="text-subtle" aria-hidden>
+                →
+              </span>
+            )}
+            <span className="rounded-md border border-border bg-panel-2/60 px-2 py-1">
+              <span className="text-text">{t.source}</span>
+              <span className="tabular ml-1.5 text-muted">{num(t.days_before_open, 0)}d before</span>
+            </span>
+          </li>
+        ))}
+        <li className="flex items-center gap-1.5">
+          <span className="text-subtle" aria-hidden>
+            →
+          </span>
+          <span className="rounded-md border border-accent-soft bg-accent-soft px-2 py-1 font-medium text-accent-text">Opportunity opened</span>
+        </li>
+      </ol>
+
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[520px] text-xs">
+          <thead>
+            <tr className="border-b border-border text-[11px] text-muted">
+              <th scope="col" className="py-1.5 pr-3 text-left font-medium">
+                Model
+              </th>
+              {sources.map((src) => (
+                <th key={src} scope="col" className="py-1.5 pl-3 text-right font-medium">
+                  {src}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((m) => (
+              <tr key={m} className="border-b border-border/60 last:border-0">
+                <th scope="row" className="py-1.5 pr-3 text-left font-normal text-text">
+                  {MODEL_LABEL[m] ?? titleCase(m)}
+                </th>
+                {sources.map((src) => {
+                  const share = shareOf(m, src);
+                  return (
+                    <td key={src} className="py-1.5 pl-3 text-right align-middle">
+                      <span className="tabular text-text">{share > 0 ? pct(share, 0) : "—"}</span>
+                      <span aria-hidden className="mt-0.5 block h-1 rounded-full bg-panel-2">
+                        <span className="block h-1 rounded-full bg-accent" style={{ width: `${Math.round(share * 100)}%` }} />
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-muted">{s.disagreement}</p>
+    </section>
   );
 }
 

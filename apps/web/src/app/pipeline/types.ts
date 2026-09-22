@@ -33,6 +33,26 @@ export interface AttributionRow {
   u_shaped_won?: number;
 }
 
+export interface AttributionCredit {
+  source: string;
+  share: number;
+  amount: number;
+}
+
+/** One opportunity where the four models credit different campaigns — the teaching example. */
+export interface AttributionSpotlight {
+  opportunity_id: string;
+  opportunity: string;
+  account_id: string;
+  account: string | null;
+  amount: number;
+  opened_at: string;
+  won: boolean;
+  touches: { source: string; occurred_at: string; days_before_open: number }[];
+  credit: Record<AttributionModel, AttributionCredit[]>;
+  disagreement: string;
+}
+
 export interface Attribution {
   window_days: number;
   models: AttributionModel[];
@@ -42,6 +62,7 @@ export interface Attribution {
   unattributed_opportunities: number;
   unattributed_pipeline: number;
   attributed_share?: number;
+  spotlight: AttributionSpotlight | null;
   limitations: string[];
 }
 
