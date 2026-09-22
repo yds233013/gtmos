@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from gtmos.api.deps import actor, db_session, parse_uuid, row, workspace
@@ -41,7 +41,7 @@ from gtmos.services import (
     stack_inspector,
 )
 from gtmos.services.common import audit, utcnow
-from gtmos.services.routing_service import load_rules, load_users
+from gtmos.services.routing_service import load_rules, load_users, sla_report
 from gtmos.services.workflow_engine import retry_run
 
 router = APIRouter(tags=["operations"])
@@ -194,6 +194,14 @@ def workflow_retry(
 
 
 # Routing ---------------------------------------------------------------------------------------------
+
+
+@router.get("/routing/sla")
+def routing_sla(
+    days: int = Query(90, ge=7, le=365), db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
+) -> dict[str, Any]:
+    """Speed to lead: was the first touch inside the window the routing rule promised?"""
+    return sla_report(db, ws.id, days)
 
 
 @router.get("/routing/rules")
@@ -491,23 +499,41 @@ def dq_summary(db: Session = Depends(db_session), ws: Workspace = Depends(worksp
     }
 
 
+# Severity order lives in SQL because it has to be applied before the page is cut. Sorting a page in
+# Python ordered the newest N issues by severity, which quietly hid an older critical issue behind
+# newer trivial ones.
+SEVERITY_ORDER = case({"high": 0, "medium": 1, "low": 2}, value=DataQualityIssue.severity, else_=3)
+
+
 @router.get("/data-quality/issues")
 def dq_issues(
     rule: str | None = None,
     status: str = "open",
-    limit: int = Query(200, le=1000),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(db_session),
     ws: Workspace = Depends(workspace),
 ) -> dict[str, Any]:
     cond = [DataQualityIssue.workspace_id == ws.id, DataQualityIssue.status == status]
     if rule:
         cond.append(DataQualityIssue.rule_key == rule)
-    sev = {"high": 0, "medium": 1, "low": 2}
+    total = db.scalar(select(func.count()).select_from(DataQualityIssue).where(*cond)) or 0
     items = list(
-        db.scalars(select(DataQualityIssue).where(*cond).order_by(DataQualityIssue.detected_at.desc()).limit(limit))
+        db.scalars(
+            select(DataQualityIssue)
+            .where(*cond)
+            .order_by(SEVERITY_ORDER, DataQualityIssue.rule_key, DataQualityIssue.detected_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
     )
-    items.sort(key=lambda i: (sev.get(i.severity, 3), i.rule_key))
-    return {"items": [row(i, exclude=("workspace_id",)) for i in items]}
+    return {
+        "items": [row(i, exclude=("workspace_id",)) for i in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @router.post("/data-quality/scan")

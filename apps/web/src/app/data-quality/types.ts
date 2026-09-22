@@ -34,3 +34,11 @@ export interface DqIssue {
   resolved_at: string | null;
   resolved_by: string | null;
 }
+
+export interface IssuePage {
+  items: DqIssue[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}

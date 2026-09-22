@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -28,6 +28,8 @@ def load_rules(db: Session, workspace_id: uuid.UUID) -> list[RuleSpec]:
             r.assign_team,
             r.overrides_existing_owner,
             r.is_active,
+            r.sla_hours,
+            r.is_fallback,
         )
         for r in rows
     ]
@@ -54,6 +56,9 @@ def load_users(db: Session, workspace_id: uuid.UUID) -> list[UserFacts]:
 def routing_context(a: Account) -> dict[str, Any]:
     return {
         "account": {
+            "id": str(a.id),
+            "name": a.name,
+            "is_named_account": a.is_named_account,
             "segment": a.segment,
             "region": a.region,
             "country": a.country,
@@ -70,7 +75,12 @@ def routing_context(a: Account) -> dict[str, Any]:
 
 
 def simulate(db: Session, account: Account) -> RoutingOutcome:
-    return route(load_rules(db, account.workspace_id), routing_context(account), load_users(db, account.workspace_id))
+    return route(
+        load_rules(db, account.workspace_id),
+        routing_context(account),
+        load_users(db, account.workspace_id),
+        now=utcnow(),
+    )
 
 
 def route_account(
@@ -90,6 +100,7 @@ def route_account(
         rules if rules is not None else load_rules(db, account.workspace_id),
         routing_context(account),
         users if users is not None else load_users(db, account.workspace_id),
+        now=decided_at,
     )
     rule_id = None
     if out.rule_key and rule_ids is not None:
@@ -116,6 +127,7 @@ def route_account(
         latency_ms=latency,
         decided_at=decided_at,
         applied=apply,
+        sla_due_at=out.sla_due_at,
     )
     db.add(decision)
     if apply and out.assigned_user_id and uuid.UUID(out.assigned_user_id) != prev:
@@ -143,3 +155,133 @@ def rule_id_map(db: Session, workspace_id: uuid.UUID) -> dict[str, uuid.UUID]:
         .tuples()
         .all()
     )
+
+
+# Touch types that count as "the rep responded". An internal note is not a touch.
+FIRST_TOUCH_TYPES = ("email_sent", "call", "linkedin", "meeting_held")
+
+
+def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str, Any]:
+    """Speed to lead: did the first touch happen inside the window routing promised?
+
+    Breach is computed against real activity rather than stored on the decision, so three states stay
+    distinguishable: touched in time, touched late, and never touched. A stored boolean would collapse
+    the last two, and "nobody has looked at it yet" is the one that costs money.
+    """
+    from gtmos.models import Activity
+
+    since = utcnow() - timedelta(days=days)
+    decisions = list(
+        db.scalars(
+            select(RoutingDecision)
+            .where(
+                RoutingDecision.workspace_id == workspace_id,
+                RoutingDecision.sla_due_at.is_not(None),
+                RoutingDecision.decided_at >= since,
+                RoutingDecision.applied.is_(True),
+            )
+            .order_by(RoutingDecision.decided_at)
+        )
+    )
+    if not decisions:
+        return {
+            "window_days": days,
+            "decisions_with_sla": 0,
+            "note": "No routed accounts carry an SLA in this window.",
+            "met": 0,
+            "late": 0,
+            "untouched": 0,
+            "median_hours_to_first_touch": None,
+            "by_rule": [],
+            "worst": [],
+        }
+
+    account_ids = {d.account_id for d in decisions}
+    touches: dict[uuid.UUID, list[datetime]] = {}
+    for account_id, occurred_at in db.execute(
+        select(Activity.account_id, Activity.occurred_at).where(
+            Activity.account_id.in_(account_ids),
+            Activity.type.in_(FIRST_TOUCH_TYPES),
+            Activity.account_id.is_not(None),
+        )
+    ).tuples():
+        if account_id is not None:
+            touches.setdefault(account_id, []).append(occurred_at)
+
+    names = dict(db.execute(select(Account.id, Account.name).where(Account.id.in_(account_ids))).tuples().all())
+    rule_names = dict(
+        db.execute(select(RoutingRule.id, RoutingRule.name).where(RoutingRule.workspace_id == workspace_id))
+        .tuples()
+        .all()
+    )
+
+    met = late = untouched = 0
+    hours: list[float] = []
+    per_rule: dict[str, dict[str, Any]] = {}
+    worst: list[dict[str, Any]] = []
+    now = utcnow()
+    for d in decisions:
+        after = sorted(t for t in touches.get(d.account_id, []) if t >= d.decided_at)
+        first = after[0] if after else None
+        bucket = per_rule.setdefault(
+            rule_names.get(d.rule_id, "No rule") if d.rule_id else "No rule",
+            {
+                "rule": rule_names.get(d.rule_id, "No rule") if d.rule_id else "No rule",
+                "n": 0,
+                "met": 0,
+                "late": 0,
+                "untouched": 0,
+            },
+        )
+        bucket["n"] += 1
+        if first is None:
+            untouched += 1
+            bucket["untouched"] += 1
+            worst.append(
+                {
+                    "account": names.get(d.account_id),
+                    "account_id": str(d.account_id),
+                    "state": "untouched",
+                    "overdue_hours": round((now - d.sla_due_at).total_seconds() / 3600, 1)
+                    if d.sla_due_at and now > d.sla_due_at
+                    else 0.0,
+                }
+            )
+            continue
+        elapsed = (first - d.decided_at).total_seconds() / 3600
+        hours.append(elapsed)
+        if d.sla_due_at is not None and first > d.sla_due_at:
+            late += 1
+            bucket["late"] += 1
+            worst.append(
+                {
+                    "account": names.get(d.account_id),
+                    "account_id": str(d.account_id),
+                    "state": "late",
+                    "overdue_hours": round((first - d.sla_due_at).total_seconds() / 3600, 1),
+                }
+            )
+        else:
+            met += 1
+            bucket["met"] += 1
+
+    hours.sort()
+    median = hours[len(hours) // 2] if hours else None
+    worst.sort(key=lambda w: -w["overdue_hours"])
+    total = len(decisions)
+    return {
+        "window_days": days,
+        "decisions_with_sla": total,
+        "met": met,
+        "late": late,
+        "untouched": untouched,
+        "hit_rate": round(met / total, 4),
+        "median_hours_to_first_touch": round(median, 1) if median is not None else None,
+        "by_rule": sorted(per_rule.values(), key=lambda r: -r["n"]),
+        "worst": worst[:20],
+        "definition": (
+            "First outbound touch (email, call, LinkedIn or meeting) after the routing decision, against "
+            "the SLA the winning rule promised. Accounts with no touch at all are counted separately from "
+            "late ones: a late touch is a process problem, no touch is a leak."
+        ),
+    }

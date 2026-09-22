@@ -12,6 +12,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   engagement: "Engagement",
 };
 const ORDER = ["fit", "intent", "timing", "technical", "engagement"] as const;
+/** Penalties are not a sixth budget: they subtract from the total after the categories are capped. */
+const NEGATIVE = "negative";
 const BUDGET: Record<string, number> = { fit: 35, intent: 25, timing: 15, technical: 15, engagement: 10 };
 
 function fmt(n: number): string {
@@ -21,6 +23,8 @@ function fmt(n: number): string {
 export function ScorePanel({ score }: { score: NonNullable<AccountDetail["score"]> }) {
   const byCat = new Map<string, ScoreComponent[]>();
   for (const c of score.components) byCat.set(c.category, [...(byCat.get(c.category) ?? []), c]);
+  const penalties = byCat.get(NEGATIVE) ?? [];
+  const deducted = penalties.reduce((sum, c) => sum + c.points, 0);
   return (
     <Panel
       title="Why this score"
@@ -49,9 +53,36 @@ export function ScorePanel({ score }: { score: NonNullable<AccountDetail["score"
               </div>
             ))}
           </dl>
+          {penalties.length > 0 && (
+            <div className="mt-2 rounded-md border border-danger-soft bg-danger-soft/40 p-2.5">
+              <div className="flex justify-between text-xs">
+                <span className="font-medium text-danger">Disqualifying signals</span>
+                <span className="tabular font-medium text-danger">{fmt(deducted)}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted">
+                Subtracted after category caps, so a penalty cannot be absorbed by a category that is already full.
+              </p>
+            </div>
+          )}
           <p className="mt-4 text-xs leading-relaxed text-muted">{score.summary}</p>
         </div>
         <div className="min-w-0 flex-1 space-y-4">
+          {penalties.length > 0 && (
+            <div>
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-danger">
+                Disqualifying signals
+              </h3>
+              <ul className="divide-y divide-border rounded-md border border-danger-soft">
+                {penalties.map((c) => (
+                  <li key={c.id} className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-3 py-2">
+                    <span className="text-xs font-medium">{c.label}</span>
+                    <span className="tabular text-xs font-medium text-danger">{fmt(c.points)}</span>
+                    <span className="col-span-2 text-xs text-muted">{c.explanation}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {ORDER.map((cat) => {
             const comps = byCat.get(cat) ?? [];
             return (

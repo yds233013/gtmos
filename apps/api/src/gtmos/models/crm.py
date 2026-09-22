@@ -95,6 +95,8 @@ class Account(IdMixin, TimestampMixin, Base):
     # Cached score (source of truth is icp_scores; these columns make list views and sorting cheap).
     icp_score: Mapped[int | None] = mapped_column(Integer)
     score_grade: Mapped[str | None] = mapped_column(String(2))  # A | B | C | D | X (excluded)
+    # A strategic account assigned to a rep by agreement. Territory rules never reassign one.
+    is_named_account: Mapped[bool] = mapped_column(default=False)
     intent_score: Mapped[int | None] = mapped_column(Integer)
     score_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_signal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

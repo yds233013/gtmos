@@ -21,6 +21,12 @@ class SignalTypeSpec:
     default_strength: float
     half_life_days: float
     description: str
+    # Negative signals subtract points instead of adding them. A taxonomy where every observation is
+    # encouraging is a taxonomy that cannot tell you to stop, and "stop working this account" is the
+    # cheapest recommendation a GTM system can make.
+    is_negative: bool = False
+    # What a rep should do about it, since a negative signal is an instruction, not a data point.
+    action: str = ""
 
 
 SIGNAL_TYPES: dict[str, SignalTypeSpec] = {
@@ -125,8 +131,73 @@ SIGNAL_TYPES: dict[str, SignalTypeSpec] = {
             21,
             "Crossed the free-tier trace volume threshold: a product-qualified account.",
         ),
+        # --- Negative and disqualifying signals ---------------------------------------------------
+        SignalTypeSpec(
+            "competitor_adopted",
+            "Competitor adopted",
+            "intent",
+            0.9,
+            180,
+            "Public evidence the account deployed a competing platform. Not permanent — renewals come "
+            "round — but the near-term window is closed.",
+            is_negative=True,
+            action="Stop the current sequence. Re-approach near their renewal with a migration angle.",
+        ),
+        SignalTypeSpec(
+            "layoffs",
+            "Layoffs announced",
+            "timing",
+            0.8,
+            120,
+            "Workforce reduction announced. Budgets freeze, champions leave, and headcount-based fit "
+            "figures are now stale.",
+            is_negative=True,
+            action="Pause outbound and re-enrich. Reaching out with a growth pitch during layoffs damages the brand.",
+        ),
+        SignalTypeSpec(
+            "budget_freeze",
+            "Budget freeze",
+            "timing",
+            0.85,
+            90,
+            "Hiring or spending freeze reported. New spend needs an exception, which lengthens every cycle.",
+            is_negative=True,
+            action="Keep the relationship warm; move the forecast date out rather than pushing the deal.",
+        ),
+        SignalTypeSpec(
+            "champion_departed",
+            "Champion departed",
+            "engagement",
+            0.9,
+            60,
+            "The contact driving the evaluation left the company. The deal's memory left with them.",
+            is_negative=True,
+            action="Multithread immediately: the replacement has no context and no commitment.",
+        ),
+        SignalTypeSpec(
+            "unsubscribed",
+            "Unsubscribed or asked to stop",
+            "engagement",
+            1.0,
+            365,
+            "Someone at the account asked not to be contacted. Compliance, not preference.",
+            is_negative=True,
+            action="Suppress the account from outbound. Inbound and existing threads only.",
+        ),
+        SignalTypeSpec(
+            "ai_project_cancelled",
+            "AI initiative cancelled",
+            "intent",
+            0.8,
+            150,
+            "The programme our product serves was publicly shelved. The use case, not the budget, is gone.",
+            is_negative=True,
+            action="Disqualify for this cycle and set a reminder rather than burning sequence capacity.",
+        ),
     )
 }
+
+NEGATIVE_SIGNAL_TYPES = frozenset(k for k, s in SIGNAL_TYPES.items() if s.is_negative)
 
 CATEGORIES = ("fit", "intent", "timing", "technical", "engagement")
 

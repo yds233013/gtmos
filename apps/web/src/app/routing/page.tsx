@@ -17,26 +17,30 @@ import { cn } from "@/lib/utils";
 
 import { destinationLabel } from "./destination";
 import { RoutingSimulator } from "./simulator";
-import type { DecisionItem, DecisionList, RoutingRuleItem, TeamUser } from "./types";
+import { SlaPanel } from "./sla-panel";
+import type { DecisionItem, DecisionList, RoutingOutcome, RoutingRuleItem, SlaReport, TeamUser } from "./types";
 
 export const metadata = { title: "Routing" };
 
 const VIEWS = [
-  { key: "all", label: "All decisions", query: "" },
-  { key: "conflicts", label: "Conflicts only", query: "&conflicts_only=true" },
-  { key: "unmatched", label: "Unmatched", query: "&outcome=unmatched" },
-  { key: "kept_owner", label: "Kept owner", query: "&outcome=kept_owner" },
-] as const;
+  { key: "all", label: "All decisions", query: "", outcome: null },
+  { key: "conflicts", label: "Conflicts only", query: "&conflicts_only=true", outcome: null },
+  { key: "fallback", label: "Fallback queue", query: "&outcome=fallback_queue", outcome: "fallback_queue" },
+  { key: "named", label: "Named accounts", query: "&outcome=named_account", outcome: "named_account" },
+  { key: "unmatched", label: "Unowned", query: "&outcome=unmatched", outcome: "unmatched" },
+  { key: "kept_owner", label: "Kept owner", query: "&outcome=kept_owner", outcome: "kept_owner" },
+] as const satisfies readonly { key: string; label: string; query: string; outcome: RoutingOutcome | null }[];
 
 export default async function RoutingPage(props: PageProps<"/routing">) {
   const sp = await props.searchParams;
   const raw = Array.isArray(sp.view) ? sp.view[0] : sp.view;
   const view = VIEWS.find((v) => v.key === raw) ?? VIEWS[0];
 
-  const [rules, decisions, users] = await settle(
+  const [rules, decisions, users, sla] = await settle(
     api<RoutingRuleItem[]>("/routing/rules"),
     api<DecisionList>(`/routing/decisions?limit=50${view.query}`),
     api<TeamUser[]>("/users"),
+    api<SlaReport>("/routing/sla?days=90"),
   );
 
   if (!rules) {
@@ -49,7 +53,7 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
   }
 
   const counts = decisions?.counts ?? {};
-  const totalDecisions = (counts.assigned ?? 0) + (counts.kept_owner ?? 0) + (counts.unmatched ?? 0);
+  const totalDecisions = Object.values(counts).reduce<number>((sum, n) => sum + (n ?? 0), 0);
   const activeRules = rules.filter((r) => r.is_active).length;
   const overloaded = (users ?? []).filter((u) => u.is_active && u.capacity > 0 && (u.utilization ?? 0) > 1).length;
   const userNames = Object.fromEntries((users ?? []).map((u) => [u.user_id, u.name]));
@@ -73,9 +77,14 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
         <StatCell label="Assigned" value={num(counts.assigned ?? 0)} />
         <StatCell label="Kept existing owner" value={num(counts.kept_owner ?? 0)} />
         <StatCell
-          label="Unmatched"
+          label="Fallback queue"
+          value={num(counts.fallback_queue ?? 0)}
+          sub={totalDecisions ? `${pct((counts.fallback_queue ?? 0) / totalDecisions)} claimed by no rule` : undefined}
+        />
+        <StatCell
+          label="Unowned"
           value={num(counts.unmatched ?? 0)}
-          sub={totalDecisions ? `${pct((counts.unmatched ?? 0) / totalDecisions)} to RevOps triage` : undefined}
+          sub={counts.unmatched ? "no rule and no queue: a rules gap" : "every account has an owner"}
         />
         <StatCell label="Reps over capacity" value={num(overloaded)} sub={users ? `of ${users.filter((u) => u.is_active).length} active` : undefined} />
       </StatGrid>
@@ -90,11 +99,15 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
         />
       </Panel>
 
+      <SlaPanel sla={sla} />
+
       <Panel title="Rules" description="Evaluated in priority order · decision counts over 90 days" bodyClassName="p-0">
         <div className="border-b border-border bg-panel-2/50 px-4 py-2 text-[11px] text-muted">
           <span className="font-medium text-text">Conflict resolution:</span> when several rules match, the lowest priority number wins; on a tie
           the more specific rule (more conditions) wins; then the rule key alphabetically. Existing active owners are kept unless the
-          winning rule overrides ownership.
+          winning rule overrides ownership. A <span className="font-medium text-text">named account</span> is assigned by agreement and no
+          rule can move it; anything no rule claims goes to the <span className="font-medium text-text">fallback queue</span> rather than
+          to nobody.
         </div>
         <Table>
           <caption className="sr-only">Routing rules ordered by priority</caption>
@@ -104,6 +117,9 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
               <Th>Rule</Th>
               <Th>When</Th>
               <Th>Assign to</Th>
+              <Th align="right" className="whitespace-nowrap">
+                First touch SLA
+              </Th>
               <Th>Owner</Th>
               <Th align="right">Decisions · 90d</Th>
             </tr>
@@ -118,6 +134,11 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-xs font-medium">{r.name}</span>
                     {!r.is_active && <Badge>Inactive</Badge>}
+                    {r.is_fallback && (
+                      <Badge tone="warning" title="Evaluated only when no other rule matched, whatever its priority">
+                        Fallback queue
+                      </Badge>
+                    )}
                   </div>
                   {r.description && <p className="mt-0.5 text-[11px] text-muted">{r.description}</p>}
                   <Mono>{r.key}</Mono>
@@ -141,8 +162,21 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
                   ) : (
                     <>
                       <div className="font-medium">{r.assign_team} pool</div>
-                      <div className="text-[11px] text-muted">Least-loaded active member</div>
+                      <div className="text-[11px] text-muted">
+                        {r.assign_strategy === "round_robin"
+                          ? "Round robin · the account id picks the seat, so a replay lands on the same rep"
+                          : "Least-loaded active member"}
+                      </div>
                     </>
+                  )}
+                </Td>
+                <Td align="right" className="align-top text-xs">
+                  {r.sla_hours ? (
+                    <span className="tabular font-medium">{r.sla_hours}h</span>
+                  ) : (
+                    <span className="text-subtle" title="This rule promises nothing about speed to first touch">
+                      —
+                    </span>
                   )}
                 </Td>
                 <Td className="align-top">
@@ -181,7 +215,7 @@ export default async function RoutingPage(props: PageProps<"/routing">) {
               key: v.key,
               label: v.label,
               href: v.key === "all" ? "/routing#decisions" : `/routing?view=${v.key}#decisions`,
-              count: v.key === "all" ? totalDecisions : v.key === "conflicts" ? null : (counts[v.key] ?? 0),
+              count: v.key === "all" ? totalDecisions : v.outcome ? (counts[v.outcome] ?? 0) : null,
             }))}
           />
           <div id="decisions">

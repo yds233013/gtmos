@@ -85,11 +85,15 @@ class RoutingRule(IdMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     priority: Mapped[int] = mapped_column(Integer)  # lower number wins
     conditions: Mapped[list[Any]] = mapped_column(default=list)  # [{field, op, value}]
-    assign_strategy: Mapped[str] = mapped_column(String(20))  # user | pool_least_loaded
+    assign_strategy: Mapped[str] = mapped_column(String(20))  # user | pool_least_loaded | round_robin
     assign_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     assign_team: Mapped[str | None] = mapped_column(String(80))
     overrides_existing_owner: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Hours allowed between assignment and first outbound touch. Null means no commitment.
+    sla_hours: Mapped[int | None] = mapped_column(Integer)
+    # The destination for accounts no other rule claims; evaluated last whatever its priority.
+    is_fallback: Mapped[bool] = mapped_column(default=False)
 
 
 class RoutingDecision(IdMixin, Base):
@@ -99,7 +103,8 @@ class RoutingDecision(IdMixin, Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
     rule_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("routing_rules.id", ondelete="SET NULL"))
-    outcome: Mapped[str] = mapped_column(String(20))  # assigned | kept_owner | unmatched
+    # assigned | kept_owner | named_account | fallback_queue | unmatched
+    outcome: Mapped[str] = mapped_column(String(20))
     assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     previous_owner_id: Mapped[uuid.UUID | None] = mapped_column()
     matched_rules: Mapped[list[Any]] = mapped_column(default=list)
@@ -109,6 +114,9 @@ class RoutingDecision(IdMixin, Base):
     latency_ms: Mapped[float | None] = mapped_column(Float)  # signal→decision latency when triggered by one
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     applied: Mapped[bool] = mapped_column(default=True)
+    # When the first outbound touch was promised. Breach is computed against real activity rather than
+    # stored, so a late touch that did happen and a touch that never happened stay distinguishable.
+    sla_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Integration(IdMixin, TimestampMixin, Base):

@@ -42,6 +42,10 @@ class ICPScore(IdMixin, Base):
     timing: Mapped[float] = mapped_column(Float)
     technical: Mapped[float] = mapped_column(Float)
     engagement: Mapped[float] = mapped_column(Float)
+    # Points subtracted for disqualifying signals, as a negative number. Stored separately because it
+    # is applied after the category caps, so total != fit + intent + timing + technical + engagement
+    # whenever an account carries one.
+    penalty: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     excluded: Mapped[bool] = mapped_column(default=False)
     exclusion_reason: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str] = mapped_column(Text, default="")

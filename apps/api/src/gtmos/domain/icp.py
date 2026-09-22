@@ -100,6 +100,10 @@ class ICPDefinition(BaseModel):
     buyer_personas: list[str] = Field(default_factory=list)
     # signal_type -> max points that signal type can contribute inside its category
     positive_signals: dict[str, float] = Field(default_factory=dict)
+    # signal_type -> points *subtracted* when the signal is present. Kept separate from
+    # `positive_signals` so a penalty can never be configured as a reward by a typo, and so the UI can
+    # show what stops an account being a target as clearly as what makes it one.
+    negative_signals: dict[str, float] = Field(default_factory=dict)
     excluded_industries: list[str] = Field(default_factory=list)
     excluded_countries: list[str] = Field(default_factory=list)
     excluded_domains: list[str] = Field(default_factory=list)
@@ -111,8 +115,26 @@ class ICPDefinition(BaseModel):
         unknown = sorted(set(v) - set(SIGNAL_TYPES))
         if unknown:
             raise ValueError(f"unknown signal types: {', '.join(unknown)}")
+        # A disqualifying signal configured here would *raise* the score of an account that just laid
+        # off half its staff. The two maps are kept separate precisely so this is a validation error.
+        negative = sorted(k for k in v if SIGNAL_TYPES[k].is_negative)
+        if negative:
+            raise ValueError(f"negative signal types belong in negative_signals: {', '.join(negative)}")
         if any(p < 0 for p in v.values()):
             raise ValueError("signal points must be non-negative")
+        return v
+
+    @field_validator("negative_signals")
+    @classmethod
+    def _known_negative_signals(cls, v: dict[str, float]) -> dict[str, float]:
+        unknown = sorted(set(v) - set(SIGNAL_TYPES))
+        if unknown:
+            raise ValueError(f"unknown signal types: {', '.join(unknown)}")
+        wrong_sign = sorted(k for k in v if not SIGNAL_TYPES[k].is_negative)
+        if wrong_sign:
+            raise ValueError(f"not negative signal types: {', '.join(wrong_sign)}")
+        if any(p < 0 for p in v.values()):
+            raise ValueError("penalty points are stated as positive numbers and subtracted")
         return v
 
     @model_validator(mode="after")
@@ -160,6 +182,14 @@ def default_icp() -> ICPDefinition:
             "integration_activated": 2,
             "usage_threshold": 3,
             "website_visit": 1,
+        },
+        negative_signals={
+            "unsubscribed": 25,
+            "competitor_adopted": 18,
+            "ai_project_cancelled": 15,
+            "champion_departed": 10,
+            "layoffs": 8,
+            "budget_freeze": 8,
         },
         excluded_industries=["Government", "Nonprofit"],
         excluded_countries=["KP", "IR", "SY", "CU"],

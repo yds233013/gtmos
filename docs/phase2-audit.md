@@ -152,6 +152,42 @@ budget freezes. Without them, "signal detection" looks one-directional.
 - Data Quality rules with audited remediation, and the Stack Inspector's evidence blocks.
 - UI health: no overflow, no console errors, real empty states with recovery actions.
 
+## Status
+
+Updated as work lands. "Closed" means the fix is in, covered by a test that would fail if it regressed,
+and the docs match the code.
+
+| Item | Status | Where |
+| --- | --- | --- |
+| P0-01 Outbound provenance broken | Closed | Draft → approval → send lineage in the seed; `test_flagship_narrative.py` |
+| P0-02 Flagship narrative holes | Closed | Real backdated executions, multi-campaign journey, experiment enrolment |
+| P0-03 Attribution unfalsifiable | Closed | Inbound opportunities, model divergence, spotlight deal on the Pipeline page |
+| P0-04 Funnel mixes denominators | Closed | Cohort funnel in `analytics.funnel`; `test_analytics_semantics.py` |
+| P0-05 No metric definitions | Closed | `domain/metrics.py`, `GET /analytics/metrics`, metric dictionary in the UI |
+| P1-01 Enrichment hides disagreement | Closed | `detect_conflict`, `provider_conflict` DQ rule, conflicts on the account page |
+| P1-02 Routing too simple | Closed | Named accounts, round robin, fallback queue, SLA + speed-to-lead report |
+| P1-03 No guardrail metrics | In progress | |
+| P1-04 Workflow under-attacked | Closed | Row-lock concurrency guard, invalid-definition handling, sweeper recovery |
+| P1-05 No CRM sync design doc | Closed | `docs/crm-sync-design.md` |
+| P1-06 No scoring evaluation | Closed | `docs/scoring-evaluation.md`, `make backtest`, `GET /analytics/scoring-evaluation` |
+| P1-07 Inspector lacks causal chains | In progress | |
+| P1-08 No Copilot adversarial tests | Closed | `test_copilot_adversarial.py`; refusals and unsupported metrics before the matcher |
+| P1-09 Grade A too rare | Closed | Bands rebased to 72/58/45 from the score distribution |
+| P1-10 No negative signals | Closed | Six disqualifying types, penalties applied after category caps |
+| P2-02 Data Quality has no pagination | Closed | Severity ordering moved into SQL, offset paging |
+| P3-04 No warehouse story | Closed | `warehouse/` dbt project, `docs/warehouse.md`, `make warehouse` |
+
+Found while fixing, not in the original audit:
+
+- **Webhook deduplication did not work for HubSpot's real payload.** An array body with a changing
+  `attemptNumber` hashed differently on every retry, so nothing was deduplicated.
+- **An invalid signature on a known event id returned 200.** Now 401, without touching stored state.
+- **Data Quality sorted a page, not the table.** The newest 200 issues were ordered by severity, so an
+  older high-severity issue could never reach the top.
+- **The sweeper only recovered `queued` runs**, so a run abandoned mid-flight by a dead worker was
+  never picked up again.
+- **`positive_signals` accepted a disqualifying signal type**, which would have added points for layoffs.
+
 ## Execution order
 
 1. P0-04, P0-05 (metrics correctness and definitions) — cheapest credibility win.

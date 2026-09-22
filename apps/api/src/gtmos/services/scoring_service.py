@@ -166,6 +166,7 @@ def rescore_accounts(
                     "timing": res.categories["timing"].points,
                     "technical": res.categories["technical"].points,
                     "engagement": res.categories["engagement"].points,
+                    "penalty": res.categories["negative"].points if "negative" in res.categories else 0.0,
                     "excluded": res.excluded,
                     "exclusion_reason": res.exclusion_reason,
                     "summary": res.summary,

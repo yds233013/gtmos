@@ -457,9 +457,69 @@ def score_account(
     if reason:
         return ScoreResult(0, "X", True, reason, categories, f"Excluded: {reason}", inputs_hash)
 
+    # Penalties are applied to the total *after* category caps. Inside a category a penalty would be
+    # absorbed by the cap — an account already at its engagement ceiling would lose nothing for its
+    # champion walking out — and the point of a negative signal is that it must be able to hurt.
+    penalties = _negative_components(icp, live_signals, now)
+    if penalties:
+        categories["negative"] = CategoryScore(
+            category="negative",
+            points=round(sum(c.points for c in penalties), 1),
+            max_points=0.0,
+            capped=False,
+            components=penalties,
+        )
+
     total = round(sum(c.points for c in categories.values()))
     total = max(0, min(100, total))
     return ScoreResult(total, grade_for(total), False, None, categories, _summary(categories, total), inputs_hash)
+
+
+def _negative_components(icp: ICPDefinition, signals: list[SignalFact], now: datetime) -> list[Component]:
+    """Points subtracted for disqualifying signals, each with the action it implies.
+
+    Only the strongest instance of a type counts: two layoff reports are one layoff, and stacking the
+    penalty would punish an account for how loudly its bad news was covered.
+    """
+    by_type: dict[str, list[SignalFact]] = {}
+    for sig in signals:
+        spec = SIGNAL_TYPES.get(sig.signal_type)
+        if spec and spec.is_negative and sig.signal_type in icp.negative_signals:
+            by_type.setdefault(sig.signal_type, []).append(sig)
+
+    comps: list[Component] = []
+    for sig_type, penalty in icp.negative_signals.items():
+        found = by_type.get(sig_type)
+        if not found or penalty <= 0:
+            continue
+        spec = SIGNAL_TYPES[sig_type]
+        valued = sorted(
+            ((signal_value(s, spec.default_strength, spec.half_life_days, now), s) for s in found),
+            key=lambda p: (-p[0], p[1].id),
+        )
+        best_val, best = valued[0]
+        pts = -penalty * best_val
+        comps.append(
+            Component(
+                "negative",
+                f"signal:{sig_type}",
+                spec.name,
+                _r(pts),
+                _r(-penalty),
+                f"{best.title}, observed {_age_phrase(best.observed_at, now)}. {spec.description} "
+                f"−{penalty * best_val:.1f} pts ({spec.half_life_days:g}-day half-life). {spec.action}",
+                [
+                    {
+                        "signal_id": s.id,
+                        "title": s.title,
+                        "observed_at": s.observed_at.isoformat(),
+                        "value": round(v, 3),
+                    }
+                    for v, s in valued[:5]
+                ],
+            )
+        )
+    return sorted(comps, key=lambda c: c.points)
 
 
 def intent_index(result: ScoreResult) -> int:

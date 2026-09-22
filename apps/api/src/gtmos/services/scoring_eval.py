@@ -43,7 +43,9 @@ VARIANTS: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
     (
         "total",
         "Total score (as shown in the product)",
-        ("fit", "technical", "timing", "intent", "engagement"),
+        # The stored total, not the sum of the category columns: disqualifying-signal penalties are
+        # applied after the caps, so the columns deliberately do not add up to it.
+        ("total",),
         "Leaks: engagement points are awarded for replies and meetings, which is part of the outcome "
         "being predicted. Its advantage over the other variants is the size of that circularity.",
     ),

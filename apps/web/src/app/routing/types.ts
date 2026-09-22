@@ -7,12 +7,14 @@ export interface RoutingRuleItem {
   description: string | null;
   priority: number;
   conditions: Condition[];
-  assign_strategy: "user" | "pool_least_loaded";
+  assign_strategy: "user" | "pool_least_loaded" | "round_robin";
   assign_user: string | null;
   assign_team: string | null;
   overrides_existing_owner: boolean;
   is_active: boolean;
   decisions_90d: number;
+  sla_hours: number | null;
+  is_fallback: boolean;
 }
 
 export interface EvaluatedCondition {
@@ -39,7 +41,7 @@ export interface RoutingConflict {
   is_conflict?: boolean;
 }
 
-export type RoutingOutcome = "assigned" | "kept_owner" | "unmatched";
+export type RoutingOutcome = "assigned" | "kept_owner" | "named_account" | "fallback_queue" | "unmatched";
 
 export interface DecisionItem {
   id: string;
@@ -89,4 +91,27 @@ export interface TeamUser {
   is_active: boolean;
   open_accounts: number;
   utilization: number | null;
+}
+
+
+export interface SlaByRule {
+  rule: string;
+  n: number;
+  met: number;
+  late: number;
+  untouched: number;
+}
+
+export interface SlaReport {
+  window_days: number;
+  decisions_with_sla: number;
+  met: number;
+  late: number;
+  untouched: number;
+  hit_rate?: number;
+  median_hours_to_first_touch: number | null;
+  by_rule: SlaByRule[];
+  worst: { account: string | null; account_id: string; state: "late" | "untouched"; overdue_hours: number }[];
+  definition?: string;
+  note?: string;
 }

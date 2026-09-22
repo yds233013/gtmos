@@ -147,3 +147,80 @@ def test_grades_and_intent_index():
     )
     assert intent_index(hot) > intent_index(quiet)
     assert "Scores" in hot.summary
+
+
+# Negative signals --------------------------------------------------------------------------------
+
+
+def test_a_disqualifying_signal_lowers_the_score():
+    """Every signal adding points is a taxonomy that can never say 'stop working this account'."""
+    clean = score_account(ICP, STRONG, [sig("ai_hiring_surge", 5)], EngagementFacts(), NOW)
+    churned = score_account(
+        ICP,
+        STRONG,
+        [sig("ai_hiring_surge", 5), sig("competitor_adopted", 5, i="neg")],
+        EngagementFacts(),
+        NOW,
+    )
+    assert churned.total < clean.total
+    penalty = next(c for c in churned.components() if c.key == "signal:competitor_adopted")
+    assert penalty.points < 0
+    assert penalty.category == "negative"
+
+
+def test_a_penalty_is_not_absorbed_by_a_category_cap():
+    """Inside its own category the penalty would vanish against the cap, which defeats the point."""
+    maxed = [sig("product_signup", 1, i="a"), sig("teammate_invited", 1, i="b"), sig("usage_threshold", 1, i="c")]
+    engaged = EngagementFacts(replies_90d=4, positive_replies_90d=2, meetings_90d=2)
+    before = score_account(ICP, STRONG, maxed, engaged, NOW)
+    assert before.categories["engagement"].capped or before.category_points("engagement") == pytest.approx(
+        before.categories["engagement"].max_points
+    )
+    after = score_account(ICP, STRONG, [*maxed, sig("champion_departed", 1, i="neg")], engaged, NOW)
+    assert after.total < before.total
+
+
+def test_a_penalty_carries_the_action_it_implies():
+    r = score_account(ICP, STRONG, [sig("unsubscribed", 2, i="neg")], EngagementFacts(), NOW)
+    c = next(c for c in r.components() if c.key == "signal:unsubscribed")
+    assert "Suppress the account from outbound" in c.explanation
+    assert c.evidence and c.evidence[0]["signal_id"] == "neg"
+
+
+def test_a_penalty_decays_like_any_other_signal():
+    fresh = score_account(ICP, STRONG, [sig("layoffs", 1, i="n")], EngagementFacts(), NOW)
+    old = score_account(ICP, STRONG, [sig("layoffs", 400, i="n")], EngagementFacts(), NOW)
+    assert old.total > fresh.total, "a two-year-old layoff should weigh less than last week's"
+
+
+def test_repeated_bad_news_is_counted_once():
+    """Two reports of the same layoff are one layoff; stacking punishes press coverage, not risk."""
+    once = score_account(ICP, STRONG, [sig("layoffs", 3, i="n1")], EngagementFacts(), NOW)
+    twice = score_account(ICP, STRONG, [sig("layoffs", 3, i="n1"), sig("layoffs", 4, i="n2")], EngagementFacts(), NOW)
+    assert once.total == twice.total
+
+
+def test_the_score_never_goes_below_zero():
+    weak = AccountFacts(
+        name="Tiny",
+        domain="tiny.example",
+        industry="Retail",
+        employee_count=30,
+        region="LATAM",
+        country="BR",
+        employee_growth_12m=0.0,
+    )
+    negatives = [
+        sig("unsubscribed", 1, i="n1"),
+        sig("competitor_adopted", 1, i="n2"),
+        sig("ai_project_cancelled", 1, i="n3"),
+        sig("layoffs", 1, i="n4"),
+    ]
+    assert score_account(ICP, weak, negatives, EngagementFacts(), NOW).total == 0
+
+
+def test_a_negative_signal_cannot_be_configured_as_a_reward():
+    with pytest.raises(ValidationError):
+        ICPDefinition(positive_signals={"layoffs": 5})
+    with pytest.raises(ValidationError):
+        ICPDefinition(negative_signals={"funding_round": 5})

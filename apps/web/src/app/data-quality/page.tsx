@@ -13,22 +13,23 @@ import { api, settle } from "@/lib/api";
 import { dateTime, num, relTime, titleCase } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import type { DqIssue, DqRule, DqSummary, IssueStatus } from "./types";
+import type { DqIssue, DqRule, DqSummary, IssuePage, IssueStatus } from "./types";
 
 export const metadata = { title: "Data Quality" };
 
 const STATUSES: IssueStatus[] = ["open", "resolved", "ignored"];
 const SEV_ORDER = { high: 0, medium: 1, low: 2 } as const;
-const ISSUE_LIMIT = 200;
+const PAGE_SIZE = 50;
 
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
-function href(rule: string | undefined, status: IssueStatus): string {
+function href(rule: string | undefined, status: IssueStatus, page = 0): string {
   const p = new URLSearchParams();
   if (rule) p.set("rule", rule);
   if (status !== "open") p.set("status", status);
+  if (page > 0) p.set("page", String(page + 1));
   const s = p.toString();
   return `/data-quality${s ? `?${s}` : ""}#issues`;
 }
@@ -39,9 +40,10 @@ export default async function DataQualityPage(props: PageProps<"/data-quality">)
   const [summary] = await settle(api<DqSummary>("/data-quality"));
   const ruleKey = summary?.rules.some((r) => r.key === first(sp.rule)) ? first(sp.rule) : undefined;
 
-  const q = new URLSearchParams({ status, limit: String(ISSUE_LIMIT) });
+  const page = Math.max(0, (Number(first(sp.page)) || 1) - 1);
+  const q = new URLSearchParams({ status, limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) });
   if (ruleKey) q.set("rule", ruleKey);
-  const [issues] = await settle(api<{ items: DqIssue[] }>(`/data-quality/issues?${q.toString()}`));
+  const [issues] = await settle(api<IssuePage>(`/data-quality/issues?${q.toString()}`));
 
   if (!summary) {
     return (
@@ -111,7 +113,7 @@ export default async function DataQualityPage(props: PageProps<"/data-quality">)
         description={
           selected
             ? selected.why
-            : `Highest severity first${items.length >= ISSUE_LIMIT ? ` · showing the first ${ISSUE_LIMIT}` : ""} · pick a rule above to focus`
+            : "Highest severity first across every issue, not just this page · pick a rule above to focus"
         }
         bodyClassName="p-0"
       >
@@ -148,6 +150,32 @@ export default async function DataQualityPage(props: PageProps<"/data-quality">)
             title={status === "open" ? "No open issues" : `No ${status} issues`}
             description={status === "open" ? "Run a scan to re-check the data." : "Nothing has been closed this way yet."}
           />
+        )}
+        {issues && issues.total > PAGE_SIZE && (
+          <nav
+            aria-label="Issue pages"
+            className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs"
+          >
+            <span className="text-muted">
+              {num(issues.offset + 1)}–{num(issues.offset + items.length)} of {num(issues.total)}
+            </span>
+            <span className="flex items-center gap-2">
+              {page > 0 ? (
+                <Link href={href(ruleKey, status, page - 1)} className="rounded border border-border px-2 py-1 hover:bg-panel-2">
+                  Previous
+                </Link>
+              ) : (
+                <span className="rounded border border-border px-2 py-1 text-subtle">Previous</span>
+              )}
+              {issues.has_more ? (
+                <Link href={href(ruleKey, status, page + 1)} className="rounded border border-border px-2 py-1 hover:bg-panel-2">
+                  Next
+                </Link>
+              ) : (
+                <span className="rounded border border-border px-2 py-1 text-subtle">Next</span>
+              )}
+            </span>
+          </nav>
         )}
         <p className="border-t border-border px-4 py-2 text-[11px] text-muted">
           Every fix and ignore is recorded as an audit event (who, when, before → after). Merges re-parent related records rather than
