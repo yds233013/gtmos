@@ -179,3 +179,10 @@ def test_multithread_opener_references_existing_champion():
     email = generate_messages(inp)[0]
     assert "I've been working with Priya" in email.body
     assert not email.blocked, email.guardrails_json()
+
+
+def test_call_prep_evidence_refs_are_not_treated_as_numeric_claims():
+    call = generate_messages(p_input())[2]
+    assert call.channel == "call_prep"
+    grounded = next(g for g in call.guardrails if g.check == "numbers_grounded")
+    assert grounded.passed, grounded.detail  # regression: "[E12]" used to fail as an ungrounded "12"

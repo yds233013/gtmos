@@ -256,7 +256,8 @@ def preview_icp(
         r = score_account(icp, account_facts(a), signals.get(a.id, []), engagement.get(a.id, EngagementFacts()), now)
         dist[r.grade] += 1
         movers.append((r.total - (a.icp_score or 0), a, r))
-    movers.sort(key=lambda m: -abs(m[0]))
+    movers = [m for m in movers if m[0] != 0]
+    movers.sort(key=lambda m: (-abs(m[0]), m[1].name))
     return {
         "accounts_scored": len(accounts),
         "grade_distribution": dict(sorted(dist.items())),

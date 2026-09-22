@@ -470,6 +470,16 @@ def _draft(db: Session, ws: Workspace, draft_id: str) -> MessageDraft:
     return d
 
 
+@router.get("/drafts/{draft_id}")
+def draft_detail(draft_id: str, db: Session = Depends(db_session), ws: Workspace = Depends(workspace)) -> dict[str, Any]:
+    d = _draft(db, ws, draft_id)
+    acct = db.get(Account, d.account_id)
+    contact = db.get(Contact, d.contact_id) if d.contact_id else None
+    return {**row(d, exclude=("workspace_id",)), "account_name": acct.name if acct else None,
+            "account_score": acct.icp_score if acct else None,
+            "contact_name": contact.full_name if contact else None, "contact_title": contact.title if contact else None}
+
+
 class TransitionBody(BaseModel):
     target: Literal["draft", "review", "approved", "ready", "rejected"]
     reason: str | None = Field(default=None, max_length=1000)

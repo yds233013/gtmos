@@ -68,6 +68,7 @@ def workflow_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]
             WorkflowRun.created_at,
             WorkflowRun.account_id,
             WorkflowRun.correlation_id,
+            WorkflowRun.trigger_event,
         )
         .join(Workflow, Workflow.id == WorkflowRun.workflow_id)
         .where(WorkflowRun.workspace_id == ws, WorkflowRun.status.in_(["failed", "dead_letter"]))
@@ -95,6 +96,7 @@ def workflow_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]
                 "created_at": r[4],
                 "account_id": str(r[5]) if r[5] else None,
                 "correlation_id": r[6],
+                "synthetic_history": bool((r[7] or {}).get("synthetic_history")),
             }
             for r in attention
         ],
@@ -215,6 +217,7 @@ def webhook_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]:
                 "received_at": e.received_at,
                 "attempts": e.attempts,
                 "correlation_id": e.correlation_id,
+                "synthetic_history": bool((e.payload or {}).get("synthetic_history")),
             }
             for e in attention
         ],

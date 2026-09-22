@@ -54,10 +54,25 @@ def workspace_info(db: Session = Depends(db_session), ws: Workspace = Depends(wo
     }
 
 
+def _current_mode(provider: str, stored: str) -> str:
+    """Modes reflect the running configuration, not what was true when the row was seeded."""
+    s = get_settings()
+    live = {
+        "hubspot": bool(s.hubspot_access_token and s.hubspot_live_writes_enabled),
+        "anthropic": s.llm_mode == "live",
+        "apollo": bool(s.apollo_api_key),
+    }
+    if provider in live:
+        if live[provider]:
+            return "live"
+        return "disabled" if provider == "apollo" else "demo"
+    return stored
+
+
 @router.get("/integrations")
 def integrations(db: Session = Depends(db_session), ws: Workspace = Depends(workspace)) -> list[dict[str, Any]]:
     return [
-        row(i, exclude=("workspace_id",))
+        {**row(i, exclude=("workspace_id",)), "mode": _current_mode(i.provider, i.mode)}
         for i in db.scalars(
             select(Integration)
             .where(Integration.workspace_id == ws.id)

@@ -19,6 +19,11 @@ export async function clientApi<T>(path: string, init?: { method?: string; body?
   const text = await res.text();
   const data = text ? (JSON.parse(text) as unknown) : null;
   if (!res.ok) {
+    const details = (data as { details?: { loc?: (string | number)[]; msg?: string }[] } | null)?.details;
+    if (Array.isArray(details) && details.length) {
+      const parts = details.map((d) => `${(d.loc ?? []).filter((x) => x !== "body").join(".")}: ${d.msg ?? ""}`);
+      throw new ClientApiError(res.status, parts.join("; "));
+    }
     const msg =
       (data as { error?: string; detail?: string } | null)?.error ??
       (data as { detail?: string } | null)?.detail ??

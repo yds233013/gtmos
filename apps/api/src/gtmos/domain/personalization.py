@@ -114,7 +114,11 @@ class PersonalizationInput:
 _NUM_RE = re.compile(r"\$?\d[\d,]*(?:\.\d+)?%?[MBK]?")
 
 
+_REF_RE = re.compile(r"\[E\d+\]")
+
+
 def _numbers(text: str) -> set[str]:
+    text = _REF_RE.sub("", text)  # citation markers like [E12] are references, not numeric claims
     return {m.group(0).replace(",", "").replace("$", "") for m in _NUM_RE.finditer(text)}
 
 

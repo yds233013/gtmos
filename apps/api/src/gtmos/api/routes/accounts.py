@@ -40,7 +40,7 @@ from gtmos.services.common import NotFound, utcnow
 from gtmos.services.enrichment_service import enrich_account, provenance_for
 from gtmos.services.next_action import next_best_action
 from gtmos.services.research_service import generate_research, latest_report
-from gtmos.services.scoring_service import current_score, rescore_accounts
+from gtmos.services.scoring_service import active_icp, current_score, rescore_accounts
 from gtmos.services.workflow_engine import run_manual
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -161,7 +161,9 @@ def list_accounts(
                 "is_flagship": a.is_flagship,
             }
         )
-    return {"items": items, "total": total, "page": page.page, "page_size": page.page_size}
+    _, icp = active_icp(db, ws.id)
+    return {"items": items, "total": total, "page": page.page, "page_size": page.page_size,
+            "category_max": icp.weights.as_dict()}
 
 
 @router.get("/facets")

@@ -129,7 +129,9 @@ def plan(question: str) -> Plan:
         params["days"] = _period(q, 28)
     elif best in ("signal_correlation", "attribution", "velocity"):
         params["days"] = _period(q, 180)
-    return Plan(best, round(best_score if best_score else 0.2, 2), params)
+    if best_score == 0:
+        return Plan("unsupported", 0.0, params)
+    return Plan(best, round(best_score, 2), params)
 
 
 def _money(x: float) -> str:
@@ -296,6 +298,10 @@ def answer(db: Session, ws: uuid.UUID, question: str) -> dict[str, Any]:
             lines.append("Fewer than 20 closed deals: treat these as directional.")
         data = {"velocity": v}
 
+    elif p.intent == "unsupported":
+        lines.append("I can only answer questions that map to an approved GTM analysis, and this one doesn't. "
+                     "Try one of these:")
+        lines.extend(f"- {q}" for q in suggested_questions()[:6])
     else:  # investigate
         rep = stack_inspector.inspect(db, ws)
         queries.append({"metric": "stack_inspector", "params": {}})

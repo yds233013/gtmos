@@ -33,11 +33,18 @@ export function ScoreBar({
   );
 }
 
-const CATEGORY_MAX: Record<string, number> = { fit: 35, intent: 25, timing: 15, technical: 15, engagement: 10 };
+const DEFAULT_MAX: Record<string, number> = { fit: 35, intent: 25, timing: 15, technical: 15, engagement: 10 };
 
-/** Compact 5-segment breakdown used in tables. */
-export function CategoryStrip({ categories }: { categories: Record<string, number> | null }) {
+/** Compact 5-segment breakdown used in tables. Segment widths follow the active ICP's category weights. */
+export function CategoryStrip({
+  categories,
+  max = DEFAULT_MAX,
+}: {
+  categories: Record<string, number> | null;
+  max?: Record<string, number>;
+}) {
   if (!categories) return <span className="text-xs text-subtle">—</span>;
+  const CATEGORY_MAX = { ...DEFAULT_MAX, ...max };
   return (
     <div className="flex w-36 gap-0.5" aria-label="Score breakdown">
       {Object.entries(CATEGORY_MAX).map(([k, max]) => (

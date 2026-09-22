@@ -200,7 +200,7 @@ export default async function AccountsPage(props: PageProps<"/accounts">) {
                       <GradeBadge grade={a.score_grade} score={a.icp_score} />
                     </Td>
                     <Td>
-                      <CategoryStrip categories={a.categories as unknown as Record<string, number> | null} />
+                      <CategoryStrip categories={a.categories as unknown as Record<string, number> | null} max={data.category_max} />
                     </Td>
                     <Td align="right">{a.intent_score ?? "—"}</Td>
                     <Td className="whitespace-nowrap text-xs">

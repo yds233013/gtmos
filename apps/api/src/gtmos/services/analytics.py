@@ -508,6 +508,11 @@ def stuck_accounts(db: Session, ws: uuid.UUID, limit: int = 50) -> dict[str, Any
             }
         )
     rows.sort(key=lambda r: (-(r["icp_score"] or 0), -r["days_in_stage"]))
+    from gtmos.models import User
+
+    names = {str(k): v for k, v in db.execute(select(User.id, User.name).where(User.workspace_id == ws)).tuples()}
+    for r in rows:
+        r["owner"] = names.get(r["owner_id"]) if r["owner_id"] else None
     return {"by_stage": dict(by_stage), "unowned_by_stage": dict(unowned), "accounts": rows[:limit], "total": len(rows)}
 
 

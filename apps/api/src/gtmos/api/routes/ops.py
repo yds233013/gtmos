@@ -250,6 +250,14 @@ def routing_decisions(
         .tuples()
         .all()
     )
+    counts["conflicts"] = (
+        db.scalar(
+            select(func.count())
+            .select_from(RoutingDecision)
+            .where(RoutingDecision.workspace_id == ws.id, func.jsonb_array_length(RoutingDecision.conflicts) > 0)
+        )
+        or 0
+    )
     return {
         "items": [
             {

@@ -42,6 +42,8 @@ def test_wilson_and_z_known_values():
     lo, hi = newcombe_diff_interval(40, 400, 64, 400)
     assert lo > 0 and hi > lo
     assert wilson_interval(0, 0) == (0.0, 0.0)
+    assert wilson_interval(0, 50)[0] == 0.0  # regression: float residue made ci_low > rate
+    assert wilson_interval(50, 50)[1] == 1.0
 
 
 def test_verdicts_are_conservative():

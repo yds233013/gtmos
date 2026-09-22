@@ -51,6 +51,7 @@ export interface Paged<T> {
   total: number;
   page: number;
   page_size: number;
+  category_max?: Record<string, number>;
 }
 
 export interface ScoreComponent {

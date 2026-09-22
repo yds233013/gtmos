@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from gtmos.domain.experiments import assign_variant
 from gtmos.domain.icp import default_icp
 from gtmos.domain.pipeline import FUNNEL_TO_LIFECYCLE
+from gtmos.domain.rules import Condition, evaluate_all
 from gtmos.domain.signals import SIGNAL_TYPES, signal_dedupe_key
 from gtmos.domain.workflows import DEFAULT_WORKFLOWS
 from gtmos.models import (
@@ -60,6 +61,7 @@ from gtmos.models import (
 )
 from gtmos.models.crm import DEAL_STAGES, FUNNEL_STAGES
 from gtmos.seed.profiles import FLAGSHIP, CompanyProfile, company_universe, segment_for
+from gtmos.services.common import jsonable
 
 log = logging.getLogger(__name__)
 NS = uuid.UUID("6f1c2a8e-3b1d-4d5e-9a7b-0c1d2e3f4a5b")
@@ -330,16 +332,16 @@ class Ctx:
 
 def _users(c: Ctx) -> None:
     spec = [
-        ("sam", "Sam Okoro", "senior_ae", "Strategic", "NA", "Senior Account Executive", 25, True),
-        ("avery", "Avery Brooks", "ae", "Enterprise NA", "NA", "Account Executive", 45, True),
-        ("jordan", "Jordan Patel", "ae", "Enterprise NA", "NA", "Account Executive", 45, True),
-        ("chris", "Chris Walker", "ae", "Enterprise NA", "NA", "Account Executive (departed)", 45, False),
-        ("lena", "Lena Fischer", "ae", "Enterprise EMEA", "EMEA", "Account Executive", 45, True),
-        ("tom", "Tom Hughes", "ae", "Enterprise EMEA", "EMEA", "Account Executive", 45, True),
-        ("casey", "Casey Nguyen", "sdr", "SDR Pool", None, "Sales Development Rep", 150, True),
-        ("drew", "Drew Martinez", "sdr", "SDR Pool", None, "Sales Development Rep", 150, True),
-        ("maya", "Maya Lopez", "sdr", "SDR Pool", None, "Sales Development Rep", 150, True),
-        ("morgan", "Morgan Reyes", "am", "Account Management", None, "Account Manager", 80, True),
+        ("sam", "Sam Okoro", "senior_ae", "Strategic", "NA", "Senior Account Executive", 60, True),
+        ("avery", "Avery Brooks", "ae", "Enterprise NA", "NA", "Account Executive", 220, True),
+        ("jordan", "Jordan Patel", "ae", "Enterprise NA", "NA", "Account Executive", 220, True),
+        ("chris", "Chris Walker", "ae", "Enterprise NA", "NA", "Account Executive (departed)", 220, False),
+        ("lena", "Lena Fischer", "ae", "Enterprise EMEA", "EMEA", "Account Executive", 220, True),
+        ("tom", "Tom Hughes", "ae", "Enterprise EMEA", "EMEA", "Account Executive", 220, True),
+        ("casey", "Casey Nguyen", "sdr", "SDR Pool", None, "Sales Development Rep", 450, True),
+        ("drew", "Drew Martinez", "sdr", "SDR Pool", None, "Sales Development Rep", 450, True),
+        ("maya", "Maya Lopez", "sdr", "SDR Pool", None, "Sales Development Rep", 450, True),
+        ("morgan", "Morgan Reyes", "am", "Account Management", None, "Account Manager", 150, True),
         ("riley", "Riley Chen", "revops", "RevOps", None, "GTM Engineer / RevOps", 0, True),
     ]
     for key, name, role, team, terr, title, cap, active in spec:
@@ -1406,7 +1408,7 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
         if rng.random() < 0.3:
             _transition(c, a, "lost", replied_at + 0.01, "Replied: not interested")
         return
-    _transition(c, a, "qualified", replied_at + 0.002, "Positive reply")
+    _transition(c, a, "qualified", replied_at + rng.uniform(0.5, 3), "Positive reply qualified on discovery screen")
     if exp_unit:
         c.outcome_rows.append(
             {
@@ -2127,36 +2129,27 @@ def _workflow_history(c: Ctx) -> None:
         steps = wf.definition["steps"]
         for a, s in items:
             created = s["observed_at"] + timedelta(minutes=rng.uniform(1, 30))
-            passes = (a.icp_score or 0) >= 75 if wf_key == "funding-signal-to-outreach" else True
-            if a.is_flagship and wf_key == "funding-signal-to-outreach":
-                passes = True
+            ctx = {"account": {"icp_score": a.icp_score, "score_grade": a.score_grade, "segment": a.segment,
+                               "is_customer": a.is_customer}}
+            passes, cond_results = evaluate_all([Condition.model_validate(x) for x in wf.definition["conditions"]],
+                                                ctx)
             run = WorkflowRun(
-                workspace_id=c.ws.id,
-                workflow_id=wf.id,
-                workflow_version=1,
-                account_id=a.id,
-                trigger_event={
-                    "type": wf.trigger_type,
-                    "event_id": str(s["id"]),
-                    "synthetic_history": True,
-                    "signal": {"id": str(s["id"]), "signal_type": s["signal_type"], "title": s["title"]},
-                },
-                idempotency_key=f"wf:{wf_key}:v1:{wf.trigger_type}:{s['id']}",
-                correlation_id=uuid.uuid4().hex[:16],
-                status="succeeded" if passes else "skipped",
-                condition_results=[{"condition": "account.icp_score ≥ 75", "passed": passes, "actual": a.icp_score}],
-                created_at=created,
-                started_at=created,
-                finished_at=created + timedelta(seconds=rng.uniform(2, 20)),
+                workspace_id=c.ws.id, workflow_id=wf.id, workflow_version=1, account_id=a.id,
+                trigger_event={"type": wf.trigger_type, "event_id": str(s["id"]), "synthetic_history": True,
+                               "signal": {"id": str(s["id"]), "signal_type": s["signal_type"], "title": s["title"]}},
+                idempotency_key=f"wf:{wf_key}:v1:{wf.trigger_type}:{s['id']}", correlation_id=uuid.uuid4().hex[:16],
+                status="succeeded" if passes else "skipped", condition_results=jsonable(cond_results),
+                created_at=created, started_at=created, finished_at=created + timedelta(seconds=rng.uniform(2, 20)),
                 data_origin="demo",
-                error=None if passes else "Conditions not met: account.icp_score ≥ 75",
-            )
+                error=None if passes else "Conditions not met: " + "; ".join(
+                    r["condition"] for r in cond_results if not r["passed"]))
             r = rng.random()
             fail_at = None
+            step_keys = [x["key"] for x in steps]
             if passes and not a.is_flagship and r < 0.05:
-                run.status, fail_at = "dead_letter", "crm"
+                run.status, fail_at = "dead_letter", step_keys[-1]
             elif passes and not a.is_flagship and r < 0.08:
-                run.status, fail_at = "failed", "enrich"
+                run.status, fail_at = "failed", step_keys[0]
             c.db.add(run)
             c.db.flush()
             t = created

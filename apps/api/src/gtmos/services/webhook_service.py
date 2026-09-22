@@ -99,10 +99,22 @@ def receive(
     existing = db.scalars(
         select(WebhookEvent).where(WebhookEvent.source == source, WebhookEvent.idempotency_key == key)
     ).first()
-    if existing is not None:
+    if existing is not None and existing.status != "rejected":
         existing.duplicate_count += 1
         db.flush()
         return ReceiveResult(existing, True, 200)
+    if existing is not None:
+        # A rejected (unauthenticated or malformed) delivery never counts as "seen": otherwise anyone could
+        # pre-empt a legitimate event by sending an unsigned copy first. Re-evaluate this delivery in place.
+        existing.attempts += 1
+        existing.signature_status = verification.status
+        existing.payload = payload if isinstance(payload, dict) else {"_items": payload}
+        existing.correlation_id = correlation_id()
+        existing.received_at = now
+        existing.error = None
+        existing.status = "received"
+        ev = existing
+        return _finish(db, ev, verification, payload, processor)
 
     ev = WebhookEvent(
         workspace_id=workspace_id,
@@ -117,6 +129,11 @@ def receive(
     )
     db.add(ev)
     db.flush()
+    return _finish(db, ev, verification, payload, processor)
+
+
+def _finish(db: Session, ev: WebhookEvent, verification: VerifyResult, payload: Any, processor: Processor
+            ) -> ReceiveResult:
     if verification.status == "invalid":
         ev.status = "rejected"
         ev.error = f"signature check failed: {verification.detail}"
