@@ -14,7 +14,7 @@ from gtmos.domain.personalization import (
     generate_messages,
     run_guardrails,
 )
-from gtmos.domain.research import ANGLES
+from gtmos.domain.research import ANGLES, sanitize_external
 from gtmos.models import (
     Account,
     AccountContactRole,
@@ -45,11 +45,13 @@ def _anchor(db: Session, account: Account, angle: str, evidence: list[ResearchEv
         return None
     ref = next((e.ref for e in evidence if e.source_record_id == s.id), None)
     ev = s.evidence or {}
+    # Signal text comes from external feeds and lands in an email a prospect reads, which is the
+    # highest-consequence place untrusted text can end up. Sanitised at the same boundary as research.
     return {
         "id": str(s.id),
-        "title": s.title,
-        "short": ev.get("short") or _short(s.title),
-        "subject_hook": ev.get("hook") or account.name,
+        "title": sanitize_external(s.title),
+        "short": sanitize_external(ev.get("short") or _short(s.title)),
+        "subject_hook": sanitize_external(ev.get("hook")) or account.name,
         "confidence": s.confidence,
         "observed_at": s.observed_at,
         "ref": ref,

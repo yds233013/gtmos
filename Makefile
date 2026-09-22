@@ -7,7 +7,7 @@ DBT_FLAGS := --project-dir $(CURDIR)/$(WAREHOUSE) --profiles-dir $(CURDIR)/$(WAR
 API_PORT ?= 8010
 WEB_PORT ?= 3010
 
-.PHONY: help setup dev-deps migrate seed reset backtest api worker web dev up down logs n8n \
+.PHONY: help setup dev-deps migrate seed reset backtest llm-eval api worker web dev up down logs n8n \
         warehouse warehouse-docs \
         test test-api test-unit test-web e2e lint typecheck format check clean
 
@@ -32,6 +32,9 @@ reset: ## Wipe and reload the DEMO dataset
 
 backtest: ## Regenerate docs/scoring-backtest.md from the current dataset
 	cd $(API) && uv run python -m gtmos.backtest --out ../../docs/scoring-backtest.md
+
+llm-eval: ## Grade the configured research writer against the golden set (no database, no network)
+	cd $(API) && uv run python -m gtmos.llmeval --out ../../docs/llm-eval-report.md
 
 api: ## Run the API with reload on :$(API_PORT)
 	cd $(API) && uv run uvicorn gtmos.main:app --port $(API_PORT) --reload --reload-dir src

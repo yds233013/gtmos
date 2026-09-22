@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
@@ -92,6 +93,37 @@ def _days_ago(ts: datetime | None, now: datetime) -> str:
     return "today" if d == 0 else ("yesterday" if d == 1 else f"{d} days ago")
 
 
+# Text GTMOS did not write: signal titles and explanations arrive from feeds, webhooks and scrapers,
+# and activity subjects come from whatever a prospect typed. It reaches a research report that a rep
+# reads and may paste into an email, so it is sanitised at the boundary rather than trusted.
+INJECTION_PATTERNS = re.compile(
+    r"\b(ignore\s+(all\s+)?(previous|prior|above|earlier)|disregard\s+(the|all|any|previous)"
+    r"|system\s+prompt|you\s+are\s+now|new\s+instructions?|admin\s+mode|developer\s+mode"
+    r"|act\s+as|pretend\s+(to\s+be|that)|jailbreak|override\s+your|for\s+testing\s+purposes)\b",
+    re.IGNORECASE,
+)
+MAX_EXTERNAL_CHARS = 400
+WITHHELD = "[source text withheld: it contained instructions rather than information]"
+
+
+def sanitize_external(text: str | None) -> str:
+    """Drop sentences that try to instruct the reader-model, and cap length.
+
+    A sentence is the right unit: removing the whole field would lose the real signal that usually sits
+    beside the injected line, and removing nothing lets an attacker write the sales pitch. The
+    replacement is visible, because silently altering evidence is its own kind of dishonesty.
+    """
+    if not text:
+        return ""
+    clean = " ".join(str(text).split())
+    parts = re.split(r"(?<=[.!?])\s+", clean)
+    kept = [p for p in parts if not INJECTION_PATTERNS.search(p)]
+    if len(kept) != len(parts):
+        kept.append(WITHHELD)
+    out = " ".join(kept).strip()
+    return out[:MAX_EXTERNAL_CHARS].rstrip() + ("…" if len(out) > MAX_EXTERNAL_CHARS else "")
+
+
 def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, str]]:
     """Returns the evidence list and an index from semantic key (e.g. 'signal:<id>') to ref."""
     ev: list[Evidence] = []
@@ -150,8 +182,8 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
         add(
             f"signal:{s['id']}",
             kind="signal",
-            label=s["title"],
-            detail=s["explanation"],
+            label=sanitize_external(s["title"]),
+            detail=sanitize_external(s["explanation"]),
             source=s["source"],
             confidence=float(s["confidence"]),
             source_url=s.get("source_url"),
@@ -313,7 +345,12 @@ def generate_deterministic(inp: ResearchInput) -> ResearchOutput:
             )
         )
     for s in sigs[:3]:
-        S["why_now"].append(Claim(f"{s['title']}: {s['explanation']}", refs(f"signal:{s['id']}")))
+        S["why_now"].append(
+            Claim(
+                f"{sanitize_external(s['title'])}: {sanitize_external(s['explanation'])}",
+                refs(f"signal:{s['id']}"),
+            )
+        )
     if not inp.signals:
         S["why_now"].append(
             Claim(
