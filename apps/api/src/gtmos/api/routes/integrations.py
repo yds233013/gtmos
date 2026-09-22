@@ -99,7 +99,7 @@ def simulated_objects(
 ) -> dict[str, Any]:
     cond = [SimulatedCrmObject.workspace_id == ws.id, SimulatedCrmObject.object_type == object_type]
     if q:
-        cond.append(func.lower(SimulatedCrmObject.properties["name"].astext).like(f"%{q.lower()}%"))
+        cond.append(func.lower(SimulatedCrmObject.properties["name"].as_string()).like(f"%{q.lower()}%"))
     items = list(
         db.scalars(select(SimulatedCrmObject).where(*cond).order_by(SimulatedCrmObject.updated_at.desc()).limit(limit))
     )

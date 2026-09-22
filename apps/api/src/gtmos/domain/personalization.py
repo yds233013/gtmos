@@ -228,9 +228,14 @@ def generate_messages(inp: PersonalizationInput) -> list[DraftContent]:
     used_refs = [sig["ref"]] if sig and sig.get("ref") else []
     evidence_used = [e for e in inp.evidence if e.get("ref") in used_refs]
 
-    opener = (
-        f"Saw that {company} {sig['short']}." if sig else f"I've been following how {company} is building with LLMs."
-    )
+    thread_with = inp.contact.get("thread_with")
+    if thread_with and sig:
+        # Multi-threading into an active deal: reference the existing relationship, not a cold trigger.
+        opener = f"I've been working with {thread_with} on agent reliability, and saw that {company} {sig['short']}."
+    elif sig:
+        opener = f"Saw that {company} {sig['short']}."
+    else:
+        opener = f"I've been following how {company} is building with LLMs."
     email_body = (
         f"Hi {first},\n\n"
         f"{opener} In our experience, {chain['pain_hypothesis']}.\n\n"

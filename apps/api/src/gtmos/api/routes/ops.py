@@ -124,7 +124,7 @@ def workflow_runs(
     if workflow:
         cond.append(Workflow.key == workflow)
     if not include_synthetic:
-        cond.append(WorkflowRun.trigger_event["synthetic_history"].astext.is_(None))
+        cond.append(WorkflowRun.trigger_event["synthetic_history"].as_string().is_(None))
     rows = db.execute(
         select(WorkflowRun, Workflow.name, Workflow.key, Account.name)
         .join(Workflow, Workflow.id == WorkflowRun.workflow_id)

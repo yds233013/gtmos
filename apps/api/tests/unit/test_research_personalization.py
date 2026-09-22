@@ -171,3 +171,11 @@ def test_message_state_machine():
     assert not check_message_transition("draft", "ready", False)[0]
     assert check_message_transition("approved", "ready", False)[0]
     assert check_message_transition("rejected", "draft", False)[0]
+
+
+def test_multithread_opener_references_existing_champion():
+    base = p_input()
+    inp = p_input(contact={**base.contact, "first_name": "Marcus", "thread_with": "Priya"})
+    email = generate_messages(inp)[0]
+    assert "I've been working with Priya" in email.body
+    assert not email.blocked, email.guardrails_json()

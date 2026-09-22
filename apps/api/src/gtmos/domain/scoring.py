@@ -397,16 +397,19 @@ def compute_inputs_hash(
 
 
 def _summary(result_cats: dict[str, CategoryScore], total: int) -> str:
-    comps = [c for cat in result_cats.values() for c in cat.components if c.points > 0]
-    comps.sort(key=lambda c: (-c.points / max(c.max_points, 0.01) * c.points, c.key))
-    top = [c.label.lower() for c in comps[:3]]
-    gaps = [cat.category for cat in result_cats.values() if cat.max_points > 0 and cat.points / cat.max_points < 0.35]
-    parts = [f"Scores {total}/100"]
-    if top:
-        parts.append("driven by " + ", ".join(top))
-    text = "; ".join(parts) + "."
-    if gaps:
-        text += " Weak on " + ", ".join(gaps) + "."
+    """One sentence a rep can read: strong categories, the signals behind them, and the gaps."""
+    strong = [c for c in result_cats.values() if c.max_points > 0 and c.points / c.max_points >= 0.7]
+    weak = [c for c in result_cats.values() if c.max_points > 0 and c.points / c.max_points < 0.35]
+    signals = sorted((c for cat in result_cats.values() for c in cat.components
+                      if c.key.startswith("signal:") and c.points > 0), key=lambda c: (-c.points, c.key))
+    text = f"Scores {total}/100"
+    if strong:
+        text += "; strong " + ", ".join(f"{c.category} ({c.points:g}/{c.max_points:g})" for c in strong)
+    if signals:
+        text += "; driven by " + ", ".join(c.label for c in signals[:3])
+    text += "."
+    if weak:
+        text += " Weak on " + ", ".join(c.category for c in weak) + "."
     return text
 
 
