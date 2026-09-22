@@ -65,6 +65,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       QUEUE_BACKEND: redis
     command: ["python", "-m", "gtmos.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, redis; redis.Redis.from_url(os.environ['REDIS_URL']).ping()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       api:
         condition: service_healthy
@@ -72,6 +77,8 @@ services:
   web:
     build:
       context: ./apps/web
+      args:
+        API_INTERNAL_URL: http://api:8000
     environment:
       API_INTERNAL_URL: http://api:8000
     ports:
