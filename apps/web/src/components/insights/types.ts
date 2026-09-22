@@ -180,6 +180,10 @@ export interface SignalType {
   default_strength: number;
   half_life_days: number;
   description: string;
+  /** A disqualifying signal: it subtracts points instead of adding them. */
+  is_negative: boolean;
+  /** What a rep should do about it. A negative signal is an instruction, not a data point. */
+  action: string;
 }
 
 export interface ICPResponse {

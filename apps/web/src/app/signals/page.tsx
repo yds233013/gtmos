@@ -301,18 +301,34 @@ export default async function SignalsPage(props: PageProps<"/signals">) {
           </Panel>
 
           {types && types.length > 0 && (
-            <Panel title="Signal types" description="Category and half-life per type" bodyClassName="p-0">
+            <Panel
+              title="Signal types"
+              description="Category and half-life per type · disqualifying types subtract points"
+              bodyClassName="p-0"
+            >
               <ul className="divide-y divide-border">
                 {types
                   .slice()
-                  .sort((a, b) => a.half_life_days - b.half_life_days)
+                  .sort((a, b) => Number(a.is_negative) - Number(b.is_negative) || a.half_life_days - b.half_life_days)
                   .map((t) => (
-                    <li key={t.key} className="flex items-start justify-between gap-3 px-4 py-2 text-xs" title={t.description}>
+                    <li
+                      key={t.key}
+                      className="flex items-start justify-between gap-3 px-4 py-2 text-xs"
+                      title={t.action ? `${t.description} ${t.action}` : t.description}
+                    >
                       <div className="min-w-0">
-                        <Link href={hrefWith(BASE, current, { type: t.key })} className="font-medium text-text hover:underline">
-                          {t.name}
-                        </Link>
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <Link href={hrefWith(BASE, current, { type: t.key })} className="font-medium text-text hover:underline">
+                            {t.name}
+                          </Link>
+                          {t.is_negative && (
+                            <Badge tone="danger" title="Subtracts points: this signal argues against working the account">
+                              Disqualifying
+                            </Badge>
+                          )}
+                        </span>
                         <div className="text-[11px] text-muted">{titleCase(t.category)}</div>
+                        {t.is_negative && t.action && <div className="mt-0.5 text-[11px] text-muted">{t.action}</div>}
                       </div>
                       <span className="tabular shrink-0 text-muted">{t.half_life_days}d</span>
                     </li>

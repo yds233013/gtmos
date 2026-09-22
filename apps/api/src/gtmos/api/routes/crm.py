@@ -210,6 +210,8 @@ def signal_types() -> list[dict[str, Any]]:
             "default_strength": s.default_strength,
             "half_life_days": s.half_life_days,
             "description": s.description,
+            "is_negative": s.is_negative,
+            "action": s.action,
         }
         for s in SIGNAL_TYPES.values()
     ]
