@@ -8,6 +8,8 @@ import type { ICPResponse, SignalType, Weights } from "@/components/insights/typ
 import { api, ApiError } from "@/lib/api";
 import { dateTime, num, pct, titleCase } from "@/lib/format";
 
+import { EvaluationPanel } from "./evaluation-panel";
+import type { ScoringEvaluation } from "./evaluation-types";
 import { IcpEditor } from "./icp-editor";
 
 export const metadata = { title: "ICP & Scoring" };
@@ -86,6 +88,8 @@ export default async function ScoringPage() {
   } catch (e) {
     error = e instanceof ApiError ? e.message : "Failed to load the ICP";
   }
+  // The backtest is supporting evidence: if it fails, the page still explains the model.
+  const evaluation = await api<ScoringEvaluation>("/analytics/scoring-evaluation").catch(() => null);
 
   const header = (
     <PageHeader
@@ -285,20 +289,23 @@ export default async function ScoringPage() {
             <div>
               <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted">Grades</div>
               <div className="grid grid-cols-5 gap-1 text-center text-[11px]">
-                <div className="rounded bg-success-soft py-1 text-success"><span className="font-semibold">A</span> ≥ 80</div>
-                <div className="rounded bg-info-soft py-1 text-info"><span className="font-semibold">B</span> ≥ 65</div>
-                <div className="rounded bg-warning-soft py-1 text-warning"><span className="font-semibold">C</span> ≥ 50</div>
-                <div className="rounded bg-panel-2 py-1 text-muted"><span className="font-semibold">D</span> &lt; 50</div>
+                <div className="rounded bg-success-soft py-1 text-success"><span className="font-semibold">A</span> ≥ 72</div>
+                <div className="rounded bg-info-soft py-1 text-info"><span className="font-semibold">B</span> ≥ 58</div>
+                <div className="rounded bg-warning-soft py-1 text-warning"><span className="font-semibold">C</span> ≥ 45</div>
+                <div className="rounded bg-panel-2 py-1 text-muted"><span className="font-semibold">D</span> &lt; 45</div>
                 <div className="rounded bg-danger-soft py-1 text-danger"><span className="font-semibold">X</span> excluded</div>
               </div>
             </div>
             <p className="text-muted">
               Same inputs always produce the same score. A 90-day half-life means a funding round is worth half its points after three
-              months and a quarter after six.
+              months and a quarter after six. Band boundaries come from the score distribution and how much a team can work, not from
+              round numbers — the panel below shows whether they order conversion correctly.
             </p>
           </div>
         </div>
       </Panel>
+
+      <EvaluationPanel evaluation={evaluation} />
 
       <IcpEditor initial={d} signalTypes={icp.signal_types} version={icp.version} />
     </div>

@@ -2,10 +2,13 @@
 SHELL := /bin/bash
 API := apps/api
 WEB := apps/web
+WAREHOUSE := warehouse
+DBT_FLAGS := --project-dir $(CURDIR)/$(WAREHOUSE) --profiles-dir $(CURDIR)/$(WAREHOUSE)
 API_PORT ?= 8010
 WEB_PORT ?= 3010
 
-.PHONY: help setup dev-deps migrate seed reset api worker web dev up down logs n8n \
+.PHONY: help setup dev-deps migrate seed reset backtest api worker web dev up down logs n8n \
+        warehouse warehouse-docs \
         test test-api test-unit test-web e2e lint typecheck format check clean
 
 help: ## Show available targets
@@ -26,6 +29,9 @@ seed: ## Load the deterministic DEMO dataset if the database is empty
 
 reset: ## Wipe and reload the DEMO dataset
 	cd $(API) && uv run python -m gtmos.seed --reset
+
+backtest: ## Regenerate docs/scoring-backtest.md from the current dataset
+	cd $(API) && uv run python -m gtmos.backtest --out ../../docs/scoring-backtest.md
 
 api: ## Run the API with reload on :$(API_PORT)
 	cd $(API) && uv run uvicorn gtmos.main:app --port $(API_PORT) --reload --reload-dir src
@@ -51,6 +57,12 @@ logs: ## Tail Docker logs
 
 n8n: ## Start optional local n8n on :5678 to import integrations/n8n templates
 	docker compose --profile n8n up -d n8n
+
+warehouse: ## Build and test the dbt analytics marts into schema `analytics` (needs `make seed`)
+	cd $(API) && uv run dbt build $(DBT_FLAGS)
+
+warehouse-docs: ## Generate the dbt docs site (serve with `dbt docs serve` from warehouse/)
+	cd $(API) && uv run dbt docs generate $(DBT_FLAGS)
 
 test: test-api test-web ## Run all backend and frontend tests
 

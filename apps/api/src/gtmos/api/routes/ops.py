@@ -37,6 +37,7 @@ from gtmos.services import (
     data_quality,
     experiments_service,
     operations,
+    scoring_eval,
     stack_inspector,
 )
 from gtmos.services.common import audit, utcnow
@@ -315,6 +316,12 @@ def overview(
 def metric_definitions() -> dict[str, Any]:
     """The metric dictionary: how every reported number is defined, and how it can be misread."""
     return {"metrics": metrics.as_list()}
+
+
+@router.get("/analytics/scoring-evaluation")
+def scoring_evaluation(db: Session = Depends(db_session), ws: Workspace = Depends(workspace)) -> dict[str, Any]:
+    """Does the ICP score actually predict conversion? Backtest with the leakage stated, not hidden."""
+    return scoring_eval.run(db, ws.id)
 
 
 @router.get("/analytics/funnel")

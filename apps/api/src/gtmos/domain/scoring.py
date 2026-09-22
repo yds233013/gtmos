@@ -19,7 +19,14 @@ from typing import Any
 from gtmos.domain.icp import ICPDefinition
 from gtmos.domain.signals import SIGNAL_TYPES, decay_factor
 
-GRADE_THRESHOLDS = (("A", 80), ("B", 65), ("C", 50))
+# Grade bands exist to drive action (A: work today, B: sequence, C: nurture, D: leave alone), so the
+# boundaries are set from the score distribution and rep capacity, not from round numbers. Under the
+# previous 80/65/50 bands grade A held one account in 2,006 — a band no rep could work with, because a
+# 100-point score is only reachable by an account that maxes fit, technical, intent, timing *and*
+# engagement at once. 72/58/45 puts A at roughly the top 1% and B at the next 10%, which is a day's list
+# and a quarter's list. `docs/scoring-evaluation.md` records the band-by-band conversion check and is
+# explicit that the check is in-sample.
+GRADE_THRESHOLDS = (("A", 72), ("B", 58), ("C", 45))
 ADDITIONAL_SIGNAL_WEIGHT = 0.25  # each extra signal of the same type adds 25% of its value
 
 # Fixed internal shares of each category budget. Changing ICP weights rescales these proportionally.

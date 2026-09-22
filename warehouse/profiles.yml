@@ -1,0 +1,19 @@
+# Connection profile for the GTMOS warehouse.
+#
+# Defaults point at the Postgres container started by `make dev-deps` (docker-compose maps the
+# database to host port 56432). Every value can be overridden with an environment variable so the
+# same project runs against a staging or production database without edits.
+gtmos:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('GTMOS_WAREHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('GTMOS_WAREHOUSE_PORT', '56432') | int }}"
+      user: "{{ env_var('GTMOS_WAREHOUSE_USER', 'gtmos') }}"
+      password: "{{ env_var('GTMOS_WAREHOUSE_PASSWORD', 'gtmos') }}"
+      dbname: "{{ env_var('GTMOS_WAREHOUSE_DB', 'gtmos') }}"
+      schema: "{{ env_var('GTMOS_WAREHOUSE_SCHEMA', 'analytics') }}"
+      threads: 4
+      keepalives_idle: 0
+      connect_timeout: 10

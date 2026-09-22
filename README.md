@@ -148,7 +148,8 @@ flowchart LR
 - **Every mutation is audited** with actor, before/after, reason and correlation id.
 
 Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`](docs/data-model.md) ·
-[`docs/integrations.md`](docs/integrations.md) · [`docs/n8n.md`](docs/n8n.md).
+[`docs/integrations.md`](docs/integrations.md) · [`docs/warehouse.md`](docs/warehouse.md) ·
+[`docs/n8n.md`](docs/n8n.md).
 
 ## GTM concepts demonstrated
 
@@ -249,8 +250,11 @@ residue, and evidence refs failing the numbers guardrail.
   per-workspace isolation (the schema is already multi-tenant) and row-level authorization.
 - **Scale:** move scoring to incremental recomputation on events, partition activities/engagements by time, add
   a proper job scheduler for nightly enrichment/DQ/reverse ETL, and put rate-limit budgets on providers.
-- **Warehouse:** in a larger company GTMOS's analytics would read from a warehouse (dbt models), and reverse ETL
-  would sync from there; the contract (keys, hashing, conflict policy) stays the same.
+- **Warehouse:** the dbt project in [`warehouse/`](warehouse) already models the operational database into
+  analytics marts and its numbers are checked against the API's semantic layer. At scale it would sit behind
+  a replication layer (Fivetran/Airbyte into Snowflake or BigQuery) rather than reading `public` directly, and
+  reverse ETL would sync from there; the contract (keys, hashing, conflict policy) stays the same.
+  See [`docs/warehouse.md`](docs/warehouse.md).
 - **LLM operations:** prompt/version registry, offline evals on a golden set (citation validity, unsupported
   claim rate), cost budgets and caching.
 
@@ -271,6 +275,7 @@ residue, and evidence refs failing the numbers guardrail.
 apps/api        FastAPI service: models, domain (pure logic), services, integrations, seed, tests
 apps/web        Next.js app: pages, UI primitives, charts, Vitest + Playwright tests
 integrations/n8n  Importable n8n workflow templates
+warehouse/      dbt project: staging views + analytics marts over the operational database
 docs/           Research, spec, architecture, data model, concepts, integrations, demo script, interview prep
 ```
 
@@ -278,7 +283,8 @@ docs/           Research, spec, architecture, data model, concepts, integrations
 
 [Market research](docs/market-research.md) · [Product spec](docs/product-spec.md) ·
 [Architecture](docs/architecture.md) · [Data model](docs/data-model.md) ·
-[GTM concepts](docs/gtm-concepts.md) · [Integrations](docs/integrations.md) · [n8n](docs/n8n.md) ·
+[GTM concepts](docs/gtm-concepts.md) · [Integrations](docs/integrations.md) ·
+[Warehouse layer](docs/warehouse.md) · [n8n](docs/n8n.md) ·
 [Demo script](docs/demo-script.md) · [Interview guide](docs/interview-guide.md) ·
 [Interview questions](docs/interview-questions.md) · [Resume bullets](docs/resume.md) ·
 [Final review](docs/final-review.md)

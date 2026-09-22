@@ -1,0 +1,397 @@
+version: 2
+
+models:
+  - name: fct_account_snapshot
+    description: >
+      One row per live account (merged duplicates excluded) with its current scoring, ownership and
+      funnel position alongside lifetime activity, signal and pipeline rollups. This is the table the
+      command-center tiles and any account-level slice should read; it is the SQL expression of what
+      `analytics.overview()` computes in Python.
+    columns:
+      - name: account_id
+        description: Primary key. Foreign key to stg_accounts.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: workspace_id
+        description: Tenant the account belongs to. Every mart carries it so the grain stays tenant-safe.
+        tests: [not_null]
+      - name: account_name
+        description: Company name as held in the CRM.
+      - name: segment
+        description: Revenue segment (smb, mid_market, enterprise, strategic). Null when unclassified.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [smb, mid_market, enterprise, strategic]
+              config:
+                where: "segment is not null"
+      - name: funnel_stage
+        description: Current account funnel stage held on the CRM record.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [prospect, contacted, engaged, qualified, meeting, opportunity, won, lost]
+      - name: score_grade
+        description: Current ICP grade. X means excluded by a disqualifying rule, not simply a low score.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [A, B, C, D, X]
+              config:
+                where: "score_grade is not null"
+      - name: icp_score
+        description: Current ICP score, 0-100.
+      - name: intent_score
+        description: Current intent score derived from recent signals, 0-100.
+      - name: is_icp_account
+        description: True when the grade is A or B, the definition `overview.icp_accounts` uses.
+      - name: is_high_intent
+        description: Intent score at or above 50 and not excluded, matching `overview.high_intent_accounts`.
+      - name: owner_id
+        description: Assigned rep. Null accounts are unowned and appear in the routing backlog.
+      - name: owner_name
+        description: Denormalised owner name so pipeline views need no join back to users.
+      - name: first_touch_at
+        description: Timestamp of the earliest recorded activity of any kind against the account.
+      - name: first_contacted_at
+        description: >
+          First `contacted` funnel transition. This anchors every cohort in the warehouse; it is not
+          the same as first_touch_at, which includes inbound and product events.
+      - name: first_engaged_at
+        description: First `engaged` funnel transition (a reply or meaningful inbound response).
+      - name: first_qualified_at
+        description: First `qualified` funnel transition.
+      - name: first_meeting_at
+        description: First `meeting` funnel transition.
+      - name: first_opportunity_at
+        description: First `opportunity` funnel transition.
+      - name: first_won_at
+        description: First `won` funnel transition.
+      - name: has_been_contacted
+        description: True when a `contacted` transition exists; the population filter for cohort analysis.
+      - name: last_signal_at
+        description: Most recent signal observation, recomputed from the signal log rather than trusted from the CRM field.
+      - name: signal_count
+        description: Lifetime count of signals observed for the account.
+      - name: contact_count
+        description: Live contacts at the account.
+      - name: verified_contact_count
+        description: Live contacts whose email verification status is `valid`.
+      - name: emails_sent
+        description: Lifetime outbound sends against the account.
+      - name: replies
+        description: Lifetime `email_replied` activities.
+      - name: positive_replies
+        description: Lifetime `positive_reply` activities, a subset of replies classified as interested.
+      - name: meetings_held
+        description: Lifetime `meeting_held` activities.
+      - name: opportunity_count
+        description: All opportunities ever opened for the account.
+        tests: [not_null]
+      - name: pipeline_usd
+        description: Sum of `amount_usd` across all opportunities, open or closed.
+      - name: won_count
+        description: Opportunities in stage closed_won.
+      - name: won_revenue_usd
+        description: Sum of `amount_usd` for closed_won opportunities.
+      - name: open_opportunity_count
+        description: Opportunities in discovery, evaluation, proposal or negotiation.
+      - name: open_pipeline_usd
+        description: Sum of `amount_usd` for open opportunities. Matches `overview.open_pipeline`.
+      - name: last_activity_at
+        description: Latest of last touch, last signal and last stage change; drives staleness views.
+
+  - name: fct_funnel_cohort
+    description: >
+      Cohort funnel at (cohort week x funnel stage) grain. An account joins the cohort of the week of
+      its first `contacted` transition and is counted at every stage it has ever reached, including
+      stages reached after the cohort week. Mirrors `analytics.funnel()`, with the API's rolling
+      window replaced by a fixed weekly grain so cohorts can be compared over time.
+    tests:
+      - unique:
+          arguments:
+            column_name: funnel_cohort_key
+    columns:
+      - name: funnel_cohort_key
+        description: Surrogate key over workspace, cohort week and stage.
+        tests: [not_null]
+      - name: workspace_id
+        tests: [not_null]
+      - name: cohort_week
+        description: Monday of the week containing the account's first `contacted` transition.
+        tests: [not_null]
+      - name: stage
+        description: Funnel stage being counted. `prospect` is excluded (it precedes the cohort entry point).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [contacted, engaged, qualified, meeting, opportunity, won]
+      - name: stage_rank
+        description: Position of the stage in the funnel, 1 (contacted) to 6 (won).
+        tests: [not_null]
+      - name: cohort_accounts
+        description: Size of the cohort, identical on every row of the week. The fixed denominator.
+        tests: [not_null]
+      - name: accounts_reached
+        description: Distinct cohort accounts that have ever reached this stage.
+        tests: [not_null]
+      - name: previous_stage_accounts
+        description: accounts_reached at the stage one rank above. Null on the contacted row.
+      - name: cohort_accounts_lost
+        description: >
+          Cohort accounts that reached `lost`. Carried as a column rather than a stage row because
+          lost is terminal and sits outside the ordered funnel.
+      - name: conversion_from_cohort
+        description: accounts_reached / cohort_accounts.
+      - name: conversion_from_previous
+        description: >
+          accounts_reached / previous_stage_accounts. Stages can be skipped, so this is indicative
+          rather than strictly sequential. Null when the previous stage had no accounts.
+
+  - name: fct_outbound_performance
+    description: >
+      Campaign performance by ISO week. Activity counts sit in the week the activity happened;
+      opportunity and pipeline counts sit in the week the opportunity opened and are attributed by
+      the opportunity's own `source_campaign_id` (single-touch source attribution).
+    tests:
+      - unique:
+          arguments:
+            column_name: outbound_performance_key
+    columns:
+      - name: outbound_performance_key
+        description: Surrogate key over workspace, campaign and week.
+        tests: [not_null]
+      - name: campaign_id
+        description: Campaign the week belongs to.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_campaigns')
+                field: campaign_id
+      - name: campaign_name
+        description: Denormalised campaign name.
+      - name: activity_week
+        description: Monday of the ISO week.
+        tests: [not_null]
+      - name: emails_sent
+        description: Count of `email_sent` activities.
+        tests: [not_null]
+      - name: emails_delivered
+        description: Count of `email_delivered` activities.
+      - name: emails_bounced
+        description: Count of `email_bounced` activities.
+      - name: emails_opened
+        description: >
+          Count of `email_opened` activities. Carried for completeness only; open tracking is
+          unreliable under Apple Mail Privacy Protection, so no rate in this model is derived from it.
+      - name: replies
+        description: Count of `email_replied` activities.
+      - name: positive_replies
+        description: Replies classified as interested.
+      - name: meetings_booked
+        description: Count of `meeting_booked` activities.
+      - name: meetings_held
+        description: Count of `meeting_held` activities; the honest meeting metric, since booked meetings no-show.
+      - name: accounts_emailed
+        description: Distinct accounts that received at least one send in the week.
+      - name: opportunities_created
+        description: Opportunities opened in the week with this campaign as source.
+      - name: pipeline_usd
+        description: Sum of `amount_usd` for those opportunities.
+      - name: won_revenue_usd
+        description: Sum of `amount_usd` for those opportunities that have since closed won.
+      - name: delivery_rate
+        description: emails_delivered / emails_sent.
+      - name: reply_rate
+        description: replies / emails_sent.
+      - name: positive_reply_share
+        description: positive_replies / replies.
+      - name: meeting_rate
+        description: meetings_held / emails_sent.
+
+  - name: fct_pipeline_snapshot
+    description: >
+      One row per opportunity with account, campaign and owner attributes denormalised on, plus deal
+      age and the lag from first contact to opportunity creation.
+    columns:
+      - name: opportunity_id
+        description: Primary key.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_opportunities')
+                field: opportunity_id
+      - name: account_id
+        description: Account the deal belongs to.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: deal_stage
+        description: Deal pipeline stage.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [discovery, evaluation, proposal, negotiation, closed_won, closed_lost]
+      - name: lead_source
+        description: How the deal originated (outbound, inbound, plg, partner, referral).
+      - name: campaign_id
+        description: Source campaign, null for deals that were never campaign-sourced.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_campaigns')
+                field: campaign_id
+      - name: owner_name
+        description: Denormalised opportunity owner.
+      - name: amount_usd
+        description: Deal value.
+        tests: [not_null]
+      - name: opened_at
+        description: Opportunity creation timestamp.
+        tests: [not_null]
+      - name: closed_at
+        description: Close timestamp, null while the deal is open.
+      - name: first_contacted_at
+        description: >
+          First `contacted` transition on the account. Null for deals on accounts never touched by
+          outbound, which is the legitimate inbound, partner and referral case.
+      - name: is_won
+        description: Deal stage is closed_won.
+        tests: [not_null]
+      - name: is_lost
+        description: Deal stage is closed_lost.
+        tests: [not_null]
+      - name: is_open
+        description: Deal is in an active stage.
+        tests: [not_null]
+      - name: is_campaign_sourced
+        description: A source campaign is set on the deal.
+      - name: open_pipeline_usd
+        description: amount_usd when open, otherwise zero. Lets a single sum give open pipeline.
+      - name: age_days
+        description: Days from open to close, or to now for deals still open.
+      - name: days_from_first_contact_to_open
+        description: Days from the account's first outbound touch to opportunity creation. Null for untouched accounts.
+
+  - name: dim_signal_effect
+    description: >
+      Per signal type, the opportunity rate for contacted accounts that had the signal against those
+      that did not, over the `signal_analysis_days` window. Association only: signal-triggered
+      campaigns target the same accounts, so part of every lift is the campaign, not the signal.
+      Raw counts are exposed alongside the rates so small samples are visible rather than implied.
+    tests:
+      - unique:
+          arguments:
+            column_name: signal_effect_key
+    columns:
+      - name: signal_effect_key
+        description: Surrogate key over workspace and signal type.
+        tests: [not_null]
+      - name: signal_type
+        description: Signal type key as emitted by the signal ingestion domain.
+        tests: [not_null]
+      - name: window_days
+        description: Analysis window in days, from the `signal_analysis_days` project variable.
+      - name: contacted_accounts
+        description: Accounts with a `contacted` transition in the window; the denominator population.
+        tests: [not_null]
+      - name: accounts_with_opportunity
+        description: Population accounts that opened an opportunity in the window.
+      - name: accounts_with_signal
+        description: Population accounts that had this signal in the window plus its 90-day head start.
+        tests: [not_null]
+      - name: with_signal_and_opportunity
+        description: Accounts that had both the signal and an opportunity.
+      - name: accounts_without_signal
+        description: Population accounts without this signal.
+      - name: baseline_opportunity_rate
+        description: accounts_with_opportunity / contacted_accounts, the population base rate.
+      - name: opportunity_rate_with_signal
+        description: with_signal_and_opportunity / accounts_with_signal.
+      - name: opportunity_rate_without_signal
+        description: Opportunity rate across the accounts that did not have the signal.
+      - name: lift
+        description: opportunity_rate_with_signal / opportunity_rate_without_signal. Null when the comparison group has no conversions.
+      - name: is_low_sample
+        description: Fewer than 30 accounts carry the signal, so the rate should not be acted on alone.
+
+  - name: fct_activity_events
+    description: >
+      The GTM engagement event stream, one row per activity, materialised incrementally on
+      `occurred_at` with a merge on `activity_id`. Account and campaign attributes are denormalised
+      on so channel reporting needs no joins. See the model header for the late-arrival contract.
+    columns:
+      - name: activity_id
+        description: Primary key, and the incremental merge key.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_activities')
+                field: activity_id
+      - name: workspace_id
+        tests: [not_null]
+      - name: account_id
+        description: Account the activity belongs to. Null for activities recorded against a contact with no account.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: campaign_id
+        description: Campaign the activity belongs to, null for manual and inbound activity.
+      - name: activity_type
+        description: Event type.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  [
+                    email_sent,
+                    email_delivered,
+                    email_opened,
+                    email_replied,
+                    email_bounced,
+                    positive_reply,
+                    meeting_booked,
+                    meeting_held,
+                    webinar_attended,
+                    linkedin,
+                    note,
+                    call,
+                  ]
+      - name: occurred_at
+        description: When the event happened. The incremental high-water mark.
+        tests: [not_null]
+      - name: occurred_week
+        description: Monday of the ISO week containing occurred_at.
+      - name: is_send
+        description: Activity is an outbound send.
+      - name: is_reply
+        description: Activity is a reply of any sentiment.
+      - name: is_positive_reply
+        description: Activity is a reply classified as interested.
+      - name: is_meeting
+        description: Activity is a booked or held meeting.
+      - name: is_attributable_touch
+        description: >
+          Activity is one of the touch types the attribution service credits (send, reply, meeting
+          held, webinar, LinkedIn). Opens are excluded deliberately.
+      - name: dbt_loaded_at
+        description: When this row was last written by dbt. Makes late-arriving reprocessing visible.

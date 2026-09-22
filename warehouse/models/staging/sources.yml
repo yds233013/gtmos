@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: gtmos_app
+    description: >
+      The GTMOS operational database (the tables SQLAlchemy writes to). In a real deployment these
+      would be landed in the warehouse by Fivetran/Airbyte; here the warehouse reads the `public`
+      schema of the same Postgres instance.
+    database: gtmos
+    schema: public
+    loaded_at_field: null
+
+    tables:
+      - name: workspaces
+      - name: users
+      - name: accounts
+      - name: contacts
+      - name: campaigns
+      - name: activities
+      - name: signals
+      - name: opportunities
+      - name: stage_transitions
+      - name: message_drafts
+      - name: icp_scores
+      - name: engagements
+      - name: experiment_assignments
+      - name: experiment_outcomes

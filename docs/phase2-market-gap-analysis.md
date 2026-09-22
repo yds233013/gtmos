@@ -135,44 +135,106 @@ Stripped of adjectives, the postings describe seven recurring systems.
 
 ## 4. What the tools actually do now
 
-Only changes that affect GTMOS's design are listed. Everything here was read from the vendor's own docs on
-2026-09-22.
+Only changes that affect GTMOS's design are listed. All read from vendor docs on 2026-09-22.
 
-- **HubSpot** (https://developers.hubspot.com/docs/developer-tooling/platform/usage-guidelines). The developer
-  platform is now **versioned** — the current standards apply to apps "on the latest versions of the developer
-  platform (**2025.2 and 2026.03**)", which is new since Phase 1 and means an integration now has a platform
-  version to pin, not just an API version. Published limits for privately distributed apps: burst **100 per
-  10 s** (Free/Starter) or **190 per 10 s** (Pro/Enterprise); daily **250,000 / 625,000 / 1,000,000** by tier;
-  at most two purchasable limit increases; up to **1,000 webhook subscriptions** per app. Batch read supports
-  the `idProperty` parameter for custom unique properties, and "cannot retrieve associations"
-  (https://developers.hubspot.com/docs/guides/api/crm/objects/companies) — the latter is a real trap for any
-  sync that assumes one batch read returns the full graph. **Lifecycle semantics are unchanged and validate
-  GTMOS's model**: the default lifecycle property "can only be moved forward by HubSpot tools" and you "must
-  clear the value manually or via a workflow before using these tools to set an earlier value"
-  (https://knowledge.hubspot.com/records/use-lifecycle-stages, last updated 2026-07-17). **New since Phase 1:**
-  calculated date-entered / date-exited and time-in-stage properties per lifecycle stage — which makes
-  stage-duration analysis a CRM-native feature rather than something GTMOS must own alone.
-- **Clay** (https://university.clay.com/docs/actions-data-credits). Two currencies: **Actions** (one per record
-  per enrichment) and **Data Credits** (**0.5 to 10+ per record depending on data type**), with a typical
-  fully-enriched record costing **6–20 credits**. Refunds occur only "if a provider refunds us due to invalid
-  data". This is the precise economic argument for GTMOS's per-field waterfall with cost accounting, and it is
-  worth citing in the README rather than describing the waterfall generically.
-- **Hightouch AI Decisioning** (https://hightouch.com/docs/ai-decisioning/overview) is the category entrant
-  GTMOS must position against. It is a warehouse-native **agent loop** — inputs (audience, goals, messages,
-  **guardrails**) → decide message/channel/timing → deliver → measure → "update future decisions based on what
-  worked" — using "reinforcement learning to balance exploration (testing new options) with optimization", where
-  "Agents operate entirely within the inputs and rules you define". The market has moved from *A/B tests a human
-  reads* to *a constrained agent allocating traffic continuously*. GTMOS's honest-statistics stance is still
-  defensible, but the framing must become "explicit, auditable experiments **versus** a learned policy".
-- **PostHog data pipelines / CDP** (https://posthog.com/docs/cdp). Sources, **transformations that "add, edit,
-  or drop event properties during ingestion, before anything is stored"**, and destinations delivered in real
-  time or by scheduled batch on the same stream that powers analytics. Schema enforcement belongs at ingest —
-  the same argument as the data-quality gap in §7.
+**The headline: the signal-selling category consolidated.** Common Room's own blog names the wave verbatim —
+"HubSpot bought Warmly. Apollo bought Pocus. Salesloft bought Clari. Gong bought RightBound. **Zoom acquired
+Common Room**" (https://www.commonroom.io/blog/revenue-os/, 2026-09-16; Zoom's announcement
+https://news.zoom.com/zoom-to-acquire-common-room-bringing-buyer-intelligence-to-its-ai-revenue-platform/,
+2026-07-02). Apollo/Pocus closed 2026-03-19 (https://www.apollo.io/magazine/apollo-acquires-pocus). Koala
+carries a site-wide banner — "Koala has been acquired by Cursor and will be shutting down on Sept 30" — and
+`app.getkoala.com` now returns HTTP 530 while `docs.getkoala.com` fails DNS entirely; the Cursor-side
+announcement is **[unverified]**. Of the four signal vendors, only **Unify** is independent, and it has quietly
+dropped "warm outbound" from its homepage in favour of "Outbound agents for every rep". Standalone
+signal-capture is being absorbed into CRM and engagement platforms — which is exactly the layer GTMOS models.
 
-Not verified this session, and therefore not relied on anywhere above: Clay's HTTP API/webhook surface and its
-signals products, HubSpot Breeze, Apollo's sequence API, Census/Fivetran Activations sync behaviours, and n8n's
-AI-node and queue-mode specifics. Phase 1's notes on those (`docs/market-research.md` §1) stand unrevised and
-should be treated as **[unverified for 2026]**.
+**HubSpot.** Two changes that affect GTMOS's adapter directly:
+- **Numbered API versions are being replaced by date-based versioning** (`/{api}/2026-09/{resource}`, two GA
+  releases a year, an 18-month support window). **v1–v3 go unsupported in September 2027 and v4 support ends
+  2027-03-30**, with explicit guidance to "Migrate directly from any legacy version to DBV. **Do not use v3 or
+  v4 as an intermediate step**" (https://developers.hubspot.com/changelog/introducing-date-based-api-versioning,
+  https://developers.hubspot.com/changelog/legacy-apis-and-legacy-apps-whats-going-unsupported-and-when).
+  GTMOS's adapter is built on v3. It is not broken, but it is now on a dated path.
+- **Legacy private-app creation is being removed from the UI** — blocked for new accounts **2026-09-28** (six
+  days from now) and for existing accounts **2026-10-26** — replaced by **Service Keys** (same changelog URL).
+  `docs/integrations.md` "Going live safely" step 2 instructs the reader to "Create a private app"; that
+  instruction expires shortly and should be updated.
+
+Confirmed and useful: batch endpoints take **100 inputs per request** for create/read/update/archive/**upsert**,
+with upsert at `POST /crm/objects/2026-09/{objectTypeId}/batch/upsert` taking `idProperty` — which validates
+GTMOS's ≤100 batching and custom-unique-key design — though "**partial upserts are not supported when using
+`email` as the `idProperty` for contacts**", and HubSpot advises ≥2 s between high-volume batch requests to
+avoid `423 Locked` (https://developers.hubspot.com/docs/guides/crm/using-object-apis). Rate limits: burst
+**100/10 s** (Free/Starter) or **190/10 s** (Pro/Ent), daily **250K / 625K / 1M**, burst per app but **daily
+shared across all apps in the account**; the CRM Search API is separate and stricter at **5 req/s, 200 page
+size, 10,000 total results**. Association limits rose 5× to **250,000** per object type per record in Nov 2025.
+**Lifecycle backward movement is still blocked** — "Default automatic updates to the lifecycle stage property
+will only move the stage forward", including via the API, with no account setting to permit it — which
+validates GTMOS's forward-only model; what *did* change is that **pipeline** backward-movement rules are now
+managed through a Pipeline Rules API (GA, Fall 2026).
+
+**Clay repriced in March 2026** and the new model is better news for GTMOS's framing than Phase 1 assumed.
+Two meters — **Actions** (≈tenths of a penny, one per enrichment) and **Data Credits** (≈pennies, **0.5–10+**
+per enrichment) — and, critically, **"If an enrichment returns no result, you're not charged Data Credits or
+Actions"** (https://www.clay.com/pricing, https://university.clay.com/docs/actions-data-credits). Clay also
+ships a free zero-credit **Infer Email** step that constructs `first.last@domain.com` and, by Clay's own
+testing, "returns a valid email roughly 31% of the time" before any paid provider runs
+(https://university.clay.com/docs/work-email-waterfall). Documented exceptions to pay-on-success exist:
+topic-intent monitoring "bills for every selected topic on every record checked, whether or not a provider
+returns intent" (https://university.clay.com/docs/topic-intent). Structurally, Clay has **moved orchestration
+out of tables** into Workflows, and positions **Audiences** — not tables — as "the unified data layer… one
+persistent profile per contact and account", where write-back defaults to "**Never write**"
+(https://university.clay.com/docs/workflows, https://university.clay.com/docs/audiences). No Clay page claims
+system-of-record status; its own customer quote is "Salesforce for record-keeping… Clay for turning it all
+into automated action". Clay shipped an **MCP server** in April 2026 and a public API/CLI/agent plugin on
+2026-09-15 (https://www.clay.com/blog/clay-mcp) — further evidence for the MCP gap in §7.
+
+**Hightouch AI Decisioning** is the category entrant GTMOS must position against: an agent = audience + goals +
+messages, where "AID uses **reinforcement learning** to balance exploration (testing new options) with
+optimization", with an **optional holdout group** measuring incremental lift, goals tiered Best→Worst, Offers
+scored by expected value, quiet hours and blackout dates
+(https://hightouch.com/docs/ai-decisioning/overview, .../agents). Two details matter for GTMOS's positioning:
+Hightouch's **Insights is descriptive only — no documented significance testing** — so GTMOS's Wilson
+intervals and refusal to call early winners are a genuine differentiator, not a naïve one; and Hightouch's
+identity resolution is **deterministic by default**, "chosen for accuracy and explainability over probabilistic
+guessing", emitting a synthetic `ht_id` and a **Golden Record** "selected by **survivorship rules**"
+(https://hightouch.com/docs/identity-resolution/overview) — the exact pattern GTMOS's merge logic is missing.
+Its **Warehouse Sync Logs** write a Changelog table with "one row for every operation Hightouch performs, with
+the result and any error message" into a `hightouch_audit` schema — a directly stealable observability pattern.
+Sync modes are Insert / Update / Upsert / Add / Remove / Archive / **All** / Snapshot / **Diff**, and **All and
+Archive do not perform CDC**. Census is now **Fivetran Activations** (acquired 2025-05-01; `docs.getcensus.com`
+301s to fivetran.com) with behaviours Update or Create / Update Only / Create Only / **Mirror** / Append Only /
+Delete. Note the cross-vendor trap: Hightouch's **All** overwrites from query results with no CDC, whereas
+Fivetran's **Mirror** diffs against what it previously sent and removes absent records — the same word means
+different things.
+
+**Apollo** constrains GTMOS's adapter more than Phase 1 recorded: bulk enrichment is **10 records per call**,
+not 100 (https://docs.apollo.io/reference/bulk-people-enrichment); waterfall is available on only two endpoints
+and requires a **mandatory HTTPS `webhook_url`** plus an admin pre-configuring data sources, and when
+`run_waterfall_email=true` the sync response **omits** `email` and `email_status` entirely. Apollo's own
+pricing page warns that "**some vendors consume credits per lookup even when no data is found**"
+(https://docs.apollo.io/docs/api-pricing) — so Clay's pay-on-success is a vendor choice, not an industry norm,
+and GTMOS is right to account for cost on misses as well as hits.
+
+**PostHog** caps group analytics at **5 group types per project**, links events to groups via `$groups` ("People
+and groups are connected by events, not by a membership list"), and cannot build cohorts from groups
+(https://posthog.com/docs/product-analytics/group-analytics) — a real constraint on account-level PLG design.
+The CDP is now "Data pipelines", with **transformations that "add, edit, or drop event properties during
+ingestion, before anything is stored"**, and feature flags can **target by group type**, i.e. account-level
+rollout (https://posthog.com/docs/feature-flags/creating-feature-flags).
+
+**n8n** has moved further than Phase 1's "verified to import into 2.40.5" suggests: **2.0 shipped December
+2025** with breaking changes (task runners on by default, env access blocked in Code nodes, ExecuteCommand
+disabled, MySQL removed) and **3.0 lands October 2026, Docker-only**
+(https://docs.n8n.io/changelog/v30-breaking-changes). Two additions bear directly on GTMOS's gaps:
+**human-in-the-loop approval for AI tool calls** (2.6.0) and an **Evaluation node** — Set Outputs / Set
+Metrics / Check If Evaluating, surfaced in an Evaluations tab
+(https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.evaluation/). When the low-code tier ships
+an eval primitive, not having one is hard to defend.
+
+**Still unverified** and not relied on above: Hightouch AI Decisioning pricing/tier, Clay's variable-AI markup
+(two official pages conflict: 0% vs 20%), the Koala shutdown year, and any Microsoft rejection-enforcement
+date (see §5).
 
 ---
 
@@ -191,11 +253,15 @@ the date stripped off. I have marked the difference.
   the canonical cross-system bug: Salesforce allows multiple contacts with one email, HubSpot does not, so
   "Salesforce returns all records that match (in no particular order), and HubSpot syncs with the first record
   returned" (https://knowledge.hubspot.com/salesforce/duplicate-salesforce-leads-or-contacts-syncing-to-hubspot).
-- **Enrichment credit burn is a documented cost model, not a rumour.** Clay bills Actions plus Data Credits at
-  **0.5–10+ credits per data type**, and a fully-enriched record typically runs **6–20 credits**; refunds happen
-  only "if a provider refunds us due to invalid data" (https://university.clay.com/docs/actions-data-credits).
-  The universal fix practitioners converge on is to gate the waterfall behind a free ICP formula so credits are
-  never spent on records that could have been disqualified for nothing.
+- **Enrichment credit burn is a documented cost model, not a rumour — but check whose model.** Clay bills
+  Actions plus Data Credits at **0.5–10+ per enrichment** and states "If an enrichment returns no result,
+  you're not charged Data Credits or Actions" (https://www.clay.com/pricing) — with documented exceptions such
+  as topic-intent monitoring, which bills per topic per record checked regardless of result. Apollo is the
+  opposite: its own docs warn that "**some vendors consume credits per lookup even when no data is found**"
+  (https://docs.apollo.io/docs/api-pricing). So pay-on-success is a *vendor policy*, not a category norm, and
+  a cost model that only counts hits will understate spend. The fix practitioners converge on is unchanged:
+  gate the waterfall behind a free ICP formula — Clay ships exactly this as a zero-credit **Infer Email** step
+  that, by its own testing, succeeds "roughly 31% of the time" before any paid provider runs.
 - **Bad lead-to-account matching produces no visible failure.** It produces "a compounding set of downstream
   errors": leads round-robin to a rep who has never spoken to the account, duplicates are created because the
   company field says "ACME Corporation" rather than "Acme Corp", and account-level attribution silently
@@ -203,14 +269,21 @@ the date stripped off. I have marked the difference.
 - **Speed-to-lead: use the real citation.** The famous "21× more likely to qualify within 5 minutes versus 30"
   and "+391% in minute one" come from Oldroyd/InsideSales (2007), reissued via HBR (2011) — not from a 2026
   study. Every "2026 speed-to-lead benchmark" I found was vendor-authored **[unverified]**.
-- **Deliverability is the best-documented risk in GTM.** Google requires spam rates in Postmaster Tools below
-  **0.30%**, recommends below **0.10%**, and since June 2024 a sender above 0.3% is **ineligible for mitigation**
-  until it stays below 0.3% for seven consecutive days (https://support.google.com/mail/answer/81126,
-  https://support.google.com/mail/answer/14229414). Microsoft began enforcing SPF + DKIM + DMARC (`p=none`
-  minimum, aligned) for senders of **≥5,000/day** to Outlook.com, Hotmail and Live on **5 May 2025**;
-  non-compliant mail goes to Junk and may be rejected with `550 5.7.515`. Microsoft publishes **no** numeric
-  complaint threshold — the 0.3% figure is Gmail's and is frequently misattributed. Independently, Validity's
-  2025 benchmark (seed-list panel) puts global inbox placement at **83.5%**, spam **6.7%**, missing **9.8%**.
+- **Deliverability is the best-documented risk in GTM, and it hardened in 2025.** Google requires spam rates in
+  Postmaster Tools below **0.30%**, recommends below **0.10%**, and — the change Phase 1 missed — since
+  **November 2025** "Gmail is ramping up its enforcement on non-compliant traffic. Messages that fail to meet
+  the email sender requirements will experience disruptions, including **temporary and permanent rejections**"
+  (https://support.google.com/mail/answer/14229414). The requirements themselves did not change; the
+  consequences did. Two nuances that matter: the bulk-sender rules apply only to **personal Gmail**, not Google
+  Workspace accounts, and "**bulk sender status doesn't have an expiration date**" — once classified, always
+  classified (https://support.google.com/mail/answer/81126). Microsoft began enforcing SPF + DKIM + DMARC
+  (`p=none` minimum, aligned) for senders of **≥5,000/day** to Outlook.com, Hotmail and Live on **5 May 2025**,
+  with `550 5.7.515` as the rejection code — but **Microsoft's own pages contradict each other** on whether
+  non-compliant mail is junked or rejected, its postmaster site still says junk with rejection "shortly", and
+  no rejection date has ever been published, so treat any such date as **[unverified]**. Microsoft publishes
+  **no** numeric complaint threshold; the 0.3% figure is Gmail's and is routinely misattributed. Independently,
+  Validity's 2025 benchmark (seed-list panel) puts global inbox placement at **83.5%**, spam **6.7%**, missing
+  **9.8%**.
 - **"AI slop" personalisation.** The circulating decline (reply rates 8.5% → 5.0% → 3.43%) is a citation loop
   with no primary dataset — **[unverified]**. The defensible evidence is Gong Labs' own corpora: across 28M+
   cold emails the average rep sends **344 emails per meeting booked**, "10%+ reply rate is the gold standard",
@@ -270,17 +343,17 @@ absence; P1 = it converts a good answer into a memorable one; P2 = only if time 
 | **ICP & segmentation** | Versioned ICP, fit scoring against it, plus **TAM mapping** (P6) and **book carving / territory design** (P2, P6) | Validated, versioned `ICPDefinition` with size bands, regions, technographics, exclusions and weights that must sum to 100 (`domain/icp.py`); preview of grade changes before save; 2,006 accounts scored | **P1 – add TAM/segment coverage.** No notion of addressable market, segment tiers (SMB/MM/ENT) or territory books. *Hiring value:* "how big is the addressable set and how is it carved?" is the first question a GTM leader asks, and two postings name it by title. |
 | **Enrichment** | Multi-provider waterfall, validation before accept, **credit/cost accounting**, provenance, caching (P5, P7) | Per-field provider order with fallback on miss/error/low-confidence, one call per provider per run, cost credits, field provenance, manual locks never overwritten (`domain/enrichment.py`) | **Met.** No change. This is already ahead of what most candidates show. |
 | **Lead-to-account matching** | Domain normalisation, free-mail exclusion, **fuzzy company-name fallback**, a confidence score, and evidence the matcher is actually accurate; Salesforce's Lead object has no FK to Account, so L2A is fuzzy matching by construction | `domain/matching.py` normalises domains and company names, blocks 20 free-mail domains, prefers an explicit `$groups.company` key (0.98) over email domain (0.90) over parent-domain fallback (0.80), returns a reason, and records unmatched events rather than dropping them | **P1 – finish what Phase 1 specified.** `normalize_company_name()` exists but `match_to_account()` never uses it, so there is **no fuzzy-name fallback**, and Phase 1's G4 requirement to report **precision and recall on a labelled fixture set** was never built. Add a ~200-row labelled fixture (including hard negatives: subsidiaries, agency domains, shared parent domains) and publish precision/recall. *Hiring value:* almost nobody quantifies their matcher; a precision/recall table is an instantly credible artifact. |
-| **Signals** | First-party product events, third-party intent/hiring/funding, resolved to an account, decayed, activated within minutes (P2 "signal detection", P5 "turn signal into pipeline") | 13 typed signals across intent/timing/engagement with source, confidence, strength, evidence, dedupe key and half-life decay (`domain/signals.py`); PostHog ingestion → account match → signal → rescore | **Met, with one gap: P1 – signal → action latency is not measured.** Add a per-signal "time from `observed_at` to first action" metric. *Hiring value:* it is the number that proves the loop is closed. |
+| **Signals** | First-party product events, third-party intent/hiring/funding, resolved to an account, decayed, activated within minutes (P2 "signal detection", P5 "turn signal into pipeline") | 13 typed signals across intent/timing/engagement with source, confidence, strength, evidence, dedupe key and half-life decay (`domain/signals.py`); PostHog ingestion → account match → signal → rescore | **Met, and strategically well-placed** — the standalone signal vendors are being absorbed into CRM and engagement platforms (§4), so owning the signal→action layer is the durable position. **P1 – signal → action latency is not measured.** Add a per-signal "time from `observed_at` to first action" metric. *Hiring value:* it is the number that proves the loop is closed. |
 | **Scoring** | Fit + intent, explainable, written to Postgres *and* the CRM, with "signal design, batching, retry logic" (P5), and score→outcome validation | Pure `score_account()`, 100 points across five categories, every point attributed to a named component with a sentence, input hash for reproducibility, grade X for exclusions (`domain/scoring.py`); `analytics.score_validation()` exists | **P1 – close the learning loop.** Scores are validated descriptively but never fed back: no periodic recalibration, no comparison of predicted vs realised conversion by grade over time. *Hiring value:* answers "how do you know your score is any good?" |
 | **Routing** | Rules of engagement, territory, round-robin with capacity, **SLA timers and escalation**, explainable decisions (P2, P6, P9) | Deterministic conflict resolution (priority → specificity → key), ownership respect, inactive-owner reassignment, least-loaded pools with capacity, decision log (`domain/routing.py`) | **P0 – speed-to-lead SLA is missing entirely.** `operations.routing_latency()` measures how long the *engine* took, not time-to-first-touch. Phase 1 specified "SLA timers" (G5) and they were not built. Add an SLA clock per routed account, breach detection, escalation and an SLA-attainment metric. *Hiring value:* speed-to-lead is the single most-quoted routing metric in RevOps and the gap is visible from the Routing page. |
-| **CRM sync / reverse ETL** | Idempotent upsert on a stable key, batch limits, retries, change detection, reconciliation, **data contracts** (P9, P10) | Upsert on custom unique `gtmos_account_id`, batches ≤100, 429/5xx retry, payload-hash change detection, dry-run preview, sync log, documented conflict policy (`services/crm_sync.py`, `docs/integrations.md`) | **P1 – reconciliation is absent.** Change detection is not reconciliation: nothing re-reads the CRM and reports drift between what GTMOS believes it pushed and what is actually there. Ramp names "reconciliation" in both postings. Add a periodic diff job with a drift report. |
+| **CRM sync / reverse ETL** | Idempotent upsert on a stable key, batch limits, retries, change detection, reconciliation, **data contracts** (P9, P10) | Upsert on custom unique `gtmos_account_id`, batches ≤100, 429/5xx retry, payload-hash change detection, dry-run preview, sync log, documented conflict policy (`services/crm_sync.py`, `docs/integrations.md`) | **P1 – reconciliation is absent, and the adapter is on a dated path.** Change detection is not reconciliation: nothing re-reads the CRM and reports drift between what GTMOS believes it pushed and what is there. Ramp names "reconciliation" in both postings. Add a periodic diff job with a drift report. Separately (**P2, but cheap and dated**): HubSpot is retiring numbered versions — v3 unsupported Sept 2027 — and **legacy private-app creation is blocked for new accounts on 2026-09-28**, replaced by Service Keys, so `docs/integrations.md` "Going live safely" step 2 needs updating. *Hiring value:* noticing a deprecation window before it bites is exactly the "track downstream impact when schemas and apps change" instinct Sierra asks for (P5). |
 | **Lifecycle & funnel definitions** | MQL/SQL/SQO definitions owned in code, handoff rules, drift detection (P5 "why data quality degrades over time") | Forward-only funnel and lifecycle with validated transitions, stage history, `FUNNEL_TO_LIFECYCLE` conflict map, invalid-transition DQ rule (`domain/pipeline.py`) | **P1 – no SQL→SQO distinction and no written definitions doc.** GTMOS has `qualified` but no separate sales-*accepted* / sales-*qualified-opportunity* gate with acceptance and rejection reasons. Add SQO with a rejection-reason taxonomy. *Hiring value:* every RevOps interview asks where the MQL→SQL→SQO handoff sits and who rejects. |
 | **Outbound + deliverability** | Sequencer integration, and demonstrated awareness of sending risk; Clay's own hiring guide lists "**ignoring risks like deliverability or targeting fatigue**" as a red flag | Campaigns → sequences → steps with full outcome events; opens explicitly untrusted (Apple MPP); `READY` is the hand-off; **no sending, by design** (`docs/integrations.md` §Outbound email) | **P0 – model deliverability without sending.** Not sending is defensible and should stay. But there is no suppression list, no bounce/complaint model, no per-domain sending budget, no consent register beyond a guardrail flag and no contact-fatigue cap. Add these as *pre-send constraints* on the approval queue, with the real thresholds encoded: Gmail's 0.30% spam-rate ceiling and 0.10% target, Microsoft's SPF+DKIM+DMARC requirement for ≥5,000/day enforced since 2025-05-05, RFC 8058 one-click unsubscribe. *Hiring value:* it converts "I didn't build sending" from an omission into a deliberate, informed boundary. |
-| **Experimentation** | "Experimentation frameworks" (P6); rapid prototyping then "measure their business impact, and scale successful experiments" (P6) | Account-level hash assignment, Wilson intervals, two-proportion z-test, Newcombe CI, pre-registered minimum sample, refuses premature winners (`domain/experiments.py`) | **Met, and a differentiator.** **P1:** add guardrail metrics (unsubscribes, complaints) so a "winner" that burns the domain cannot win — Hightouch AI Decisioning makes guardrails a first-class input, and GTMOS currently has none. **P2:** add a paragraph positioning explicit, auditable experiments against a learned allocation policy (§4). |
+| **Experimentation** | "Experimentation frameworks" (P6); rapid prototyping then "measure their business impact, and scale successful experiments" (P6) | Account-level hash assignment, Wilson intervals, two-proportion z-test, Newcombe CI, pre-registered minimum sample, refuses premature winners (`domain/experiments.py`) | **Met, and a bigger differentiator than assumed** — Hightouch's AI Decisioning Insights is **descriptive only, with no documented significance testing** (§4), so GTMOS's Wilson intervals and refusal to call early winners beat the category leader on rigour. **P1:** add guardrail metrics (unsubscribes, complaints) so a "winner" that burns the domain cannot win — AID makes guardrails and an **optional holdout group for incremental lift** first-class inputs; GTMOS has neither. **P2:** state the positioning explicitly — auditable experiments versus a learned allocation policy. |
 | **Attribution** | Pipeline/conversion/attribution visibility for GTM leaders (P6); the ability to defend the number | Four models side by side, 180-day lookback, unattributed share reported rather than dumped into "direct", opens excluded (`domain/attribution.py`) | **Met.** **P2:** add a self-reported-attribution field and an incrementality holdout, and say plainly that models are not causal. |
-| **Data quality** | "Design for data quality — build validation, governance, and structure the rest of the GTM stack can rely on" (P1); dedupe; "Own the quality, documentation, and governance of GTM data" (P6) | 11 rules with stable fingerprints, auto-resolve, audited remediation (merge/route/suppress) (`services/data_quality.py`) | **P1 – validate on ingest, not only in batch.** Today DQ is a scan. Add write-time validation (a data contract at the webhook and enrichment boundary) so bad records are rejected or quarantined rather than detected later, plus **new duplicates created per week** as a flow metric alongside the current stock counts, and a documented survivorship rule per field for merges. *Hiring value:* it is the difference between a monitor and a control. |
-| **Observability** | Run logs, dead-letter queues, replay, correlation IDs, on-call; Anthropic measures "lead time, failure rate" on the pipeline itself (P13) | Correlation IDs, audit log with before/after, Operations page (workflow failure rate, retries, DLQ backlog, sync and webhook health, provider hit/error rates), Stack Inspector (`services/operations.py`, `stack_inspector.py`) | **P1 – no SLOs, no alerting, no structured log/trace export.** Everything is a dashboard a human must visit. Define 3–4 explicit SLOs with error budgets (e.g. "PQL routed within 1 business day", "webhook processed < 60 s p95") and surface breach state. |
-| **AI usage & safety** | "Prompt design, **eval loops**, error handling, and the difference between a demo and a system you can trust at scale" (P5); "Develop evaluation frameworks for agent behavior, and run them in development **and in production**"; "Instrument model and tool calls in production… that ties agent actions to pipeline and revenue" (P12) | Evidence-pack grounding, numbered citations E1..En, uncited claims stripped, blocking guardrails before approval, DRAFT→REVIEW→APPROVED→READY, `PROMPT_VERSION` recorded (`domain/research.py`, `domain/personalization.py`, `services/research_service.py`) | **P0 – there is no eval harness.** GTMOS validates each output at runtime but has no golden set, no scored rubric, no regression run on prompt change, no unsupported-claim rate tracked over time, and no measurement of whether approved drafts outperform. This is the single most-repeated production-LLM requirement in the postings, and GTMOS is ~80% of the way there already. *Hiring value:* highest ratio of credibility gained to work required. |
+| **Data quality** | "Design for data quality — build validation, governance, and structure the rest of the GTM stack can rely on" (P1); dedupe; "Own the quality, documentation, and governance of GTM data" (P6) | 11 rules with stable fingerprints, auto-resolve, audited remediation (merge/route/suppress) (`services/data_quality.py`) | **P1 – validate on ingest, not only in batch.** Today DQ is a scan. Add write-time validation (a data contract at the webhook and enrichment boundary) so bad records are rejected or quarantined rather than detected later, plus **new duplicates created per week** as a flow metric alongside the current stock counts, and **survivorship rules per field** producing a canonical golden record on merge — the pattern Hightouch documents (`ht_id` + a Golden Record "selected by survivorship rules") and the thing that makes a merge defensible rather than lossy. *Hiring value:* it is the difference between a monitor and a control. |
+| **Observability** | Run logs, dead-letter queues, replay, correlation IDs, on-call; Anthropic measures "lead time, failure rate" on the pipeline itself (P13) | Correlation IDs, audit log with before/after, Operations page (workflow failure rate, retries, DLQ backlog, sync and webhook health, provider hit/error rates), Stack Inspector (`services/operations.py`, `stack_inspector.py`) | **P1 – no SLOs, no alerting, no structured log/trace export.** Everything is a dashboard a human must visit. Define 3–4 explicit SLOs with error budgets ("PQL routed within 1 business day", "webhook processed < 60 s p95") and surface breach state. Steal Hightouch's pattern: a durable **changelog table with one row per sync operation, its result and any error message** (§4), queryable rather than only rendered. |
+| **AI usage & safety** | "Prompt design, **eval loops**, error handling, and the difference between a demo and a system you can trust at scale" (P5); "Develop evaluation frameworks for agent behavior, and run them in development **and in production**"; "Instrument model and tool calls in production… that ties agent actions to pipeline and revenue" (P12) | Evidence-pack grounding, numbered citations E1..En, uncited claims stripped, blocking guardrails before approval, DRAFT→REVIEW→APPROVED→READY, `PROMPT_VERSION` recorded (`domain/research.py`, `domain/personalization.py`, `services/research_service.py`) | **P0 – there is no eval harness.** GTMOS validates each output at runtime but has no golden set, no scored rubric, no regression run on prompt change, no unsupported-claim rate tracked over time, and no measurement of whether approved drafts outperform. It is the single most-repeated production-LLM requirement in the postings, and GTMOS is ~80% of the way there (`PROMPT_VERSION` is already recorded). Note that **n8n now ships an Evaluation node** (Set Outputs / Set Metrics, surfaced in an Evaluations tab) — when the low-code tier has an eval primitive, not having one is hard to defend. *Hiring value:* highest ratio of credibility gained to work required. |
 | **Warehouse / dbt** | Named in six postings: Postgres + Fivetran + reverse ETL (P5); "Snowflake, BigQuery, dbt, Airflow, Looker, Hex" (P6); "dbt models… testing and documentation standards… semantic models… reconciliation, versioning, clear lineage" (P14); BigQuery/Databricks + Sigma/Hex (P7) | Nothing. Zero `.sql` files and no dbt project in the repo; `services/analytics.py` computes every metric in Python via SQLAlchemy | **P0 – the largest single hole.** GTMOS's own README concedes this ("in a larger company GTMOS's analytics would read from a warehouse (dbt models)"). Add a small dbt project over the existing Postgres: staging models, a funnel/pipeline mart, dbt tests (unique, not_null, accepted_values, relationships), `dbt docs` lineage, and make at least the funnel and velocity metrics read from the mart. *Hiring value:* it is the most commonly named tool GTMOS cannot show, and "I don't know dbt" ends a lot of screens. |
 | **Security & permissions** | "what tools and permissions they hold, how they are sandboxed… and what they are not trusted to do unsupervised"; "kill-switch and rollback mechanics"; "the audit trail and evidence a SOX-scoped platform needs" (P13); "financial correctness and auditability" (P11) | Single demo operator; `ADMIN_API_TOKEN` gates destructive and live-write endpoints and is mandatory in production; HMAC on webhooks; full audit log with actor/before/after/reason (`api/deps.py`, `services/common.py`) | **P0 – add roles and a kill switch.** Three roles (rep / RevOps / admin) enforced on mutating endpoints, plus a global "pause all automation" kill switch with a reason and audit entry, and per-workflow enable/disable. The multi-tenant schema already exists, so this is mostly enforcement. *Hiring value:* it directly answers the highest-paid GTM-engineering posting in the set (P13). |
 | **Delivery pipeline / change management** | PR review, CI/CD, automated UAT, on-call (P9, P11, P13); UAT for releases (P15); lanes for agentic vs human-in-the-loop changes (P13) | `make check` (lint, mypy strict, 160 tests, production build, Playwright); a GitHub workflow directory exists | **P1 – make the governance visible.** Add a documented change-management story for *GTM config* (ICP versions, routing rules, workflow definitions): propose → preview impact → approve → apply → rollback, with the diff audited. GTMOS already previews ICP grade changes; generalise it. *Hiring value:* nobody else's portfolio has this, and three postings are about it. |
@@ -310,10 +383,12 @@ Each of these is something the market talks about that would, in this portfolio,
    One page describing the hand-off contract gets most of the credit (§7).
 6. **More seeded scale.** 200,000 synthetic accounts proves nothing a reviewer can verify and slows the demo.
    If scale needs proving, benchmark one path (scoring throughput, reverse-ETL batch) and publish the numbers.
-7. **Integrations with signal vendors (Common Room, Unify, Koala, Pocus) or AI-SDR products (11x, Artisan,
-   Regie).** I could not verify a single job posting at any of them, and the GTMOS signal model already
-   generalises over the category. Thin, untested API clients dilute the "everything here actually runs" claim
-   that is currently the project's strongest asset.
+7. **Integrations with signal vendors or AI-SDR products.** Three of the four signal vendors were acquired
+   inside twelve months — Zoom/Common Room, Apollo/Pocus, Cursor/Koala (shutting down, APIs already dead) —
+   and Regie's "Auto-Pilot" branding is gone, its URL a 404 (§4). Building against this category would mean
+   building against products that may not exist by the time anyone reviews the repo, and I could not verify a
+   single job posting at any of them. GTMOS's signal model already generalises over the whole category; thin,
+   untested API clients dilute the "everything here actually runs" claim that is its strongest asset.
 8. **A second LLM provider, a model router, or more chat surface** (summary widgets, "ask anything" boxes).
    No posting asks for any of it; the postings reward evals, oversight and measured impact instead.
 9. **Rewriting the demo dataset to look like a real company.** Synthetic-and-labelled is a credibility

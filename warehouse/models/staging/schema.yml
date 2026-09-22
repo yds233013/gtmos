@@ -1,0 +1,197 @@
+version: 2
+
+models:
+  - name: stg_accounts
+    description: One row per account in the operational CRM, including merged duplicates (`is_live` filters them out).
+    columns:
+      - name: account_id
+        tests: [unique, not_null]
+      - name: workspace_id
+        tests: [not_null]
+      - name: funnel_stage
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [prospect, contacted, engaged, qualified, meeting, opportunity, won, lost]
+      - name: score_grade
+        tests:
+          - accepted_values:
+              arguments:
+                values: [A, B, C, D, X]
+
+  - name: stg_users
+    description: Sales and marketing users who own accounts, campaigns and opportunities.
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+
+  - name: stg_contacts
+    description: One row per contact, including merged duplicates.
+    columns:
+      - name: contact_id
+        tests: [unique, not_null]
+      - name: email_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [valid, invalid, risky, unknown, catch_all, unverified]
+      - name: account_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+  - name: stg_campaigns
+    description: Outbound and marketing campaigns.
+    columns:
+      - name: campaign_id
+        tests: [unique, not_null]
+      - name: campaign_key
+        tests: [not_null]
+
+  - name: stg_activities
+    description: Append-only GTM activity log (sends, deliveries, replies, meetings, webinars, notes).
+    columns:
+      - name: activity_id
+        tests: [unique, not_null]
+      - name: occurred_at
+        tests: [not_null]
+      - name: activity_type
+        tests: [not_null]
+      - name: account_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: campaign_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_campaigns')
+                field: campaign_id
+
+  - name: stg_signals
+    description: Buying signals observed for an account (funding, hiring, product usage, web intent).
+    columns:
+      - name: signal_id
+        tests: [unique, not_null]
+      - name: account_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: observed_at
+        tests: [not_null]
+
+  - name: stg_opportunities
+    description: Deals. `deal_stage` is the deal-level pipeline, not the account funnel stage.
+    columns:
+      - name: opportunity_id
+        tests: [unique, not_null]
+      - name: account_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+      - name: deal_stage
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [discovery, evaluation, proposal, negotiation, closed_won, closed_lost]
+      - name: amount_usd
+        tests: [not_null]
+
+  - name: stg_stage_transitions
+    description: Append-only log of every funnel and deal stage change; the source of all cohort logic.
+    columns:
+      - name: stage_transition_id
+        tests: [unique, not_null]
+      - name: to_stage
+        tests: [not_null]
+      - name: changed_at
+        tests: [not_null]
+      - name: entity_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: [account, opportunity]
+
+  - name: stg_message_drafts
+    description: AI-generated outbound drafts and their human review state.
+    columns:
+      - name: message_draft_id
+        tests: [unique, not_null]
+      - name: draft_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [draft, review, approved, ready, sent, rejected]
+      - name: account_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+  - name: stg_icp_scores
+    description: Scoring history. `is_current` marks the score the account currently carries.
+    columns:
+      - name: icp_score_id
+        tests: [unique, not_null]
+      - name: score_grade
+        tests:
+          - accepted_values:
+              arguments:
+                values: [A, B, C, D, X]
+      - name: account_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+  - name: stg_engagements
+    description: Product engagement events (PLG telemetry) joined to accounts and contacts.
+    columns:
+      - name: engagement_id
+        tests: [unique, not_null]
+      - name: event_name
+        tests: [not_null]
+      - name: occurred_at
+        tests: [not_null]
+
+  - name: stg_experiment_assignments
+    description: Unit-to-variant assignments for outbound experiments.
+    columns:
+      - name: assignment_id
+        tests: [unique, not_null]
+      - name: experiment_id
+        tests: [not_null]
+      - name: variant_id
+        tests: [not_null]
+
+  - name: stg_experiment_outcomes
+    description: Metric observations attached to an experiment assignment.
+    columns:
+      - name: outcome_id
+        tests: [unique, not_null]
+      - name: assignment_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_experiment_assignments')
+                field: assignment_id
+      - name: metric
+        tests:
+          - accepted_values:
+              arguments:
+                values: [reply, positive_reply, meeting, opportunity]

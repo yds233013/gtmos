@@ -65,7 +65,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Thesis.** Transparent points before black-box probabilities: a deterministic, versioned rules model where every point has a sentence and evidence, validated against outcomes, and eventually calibrated by a statistical model.
 
 **Specifics** (`domain/scoring.py`).
-- **Five categories** with ICP-configurable budgets: Fit 35, Intent 25, Timing 15, Technical 15, Engagement 10. Each is capped at its budget. Grades are A ≥ 80, B ≥ 65, C ≥ 50, then D, with **X** for exclusions (sanctioned country, excluded industry, below 25 employees, do-not-target domain).
+- **Five categories** with ICP-configurable budgets: Fit 35, Intent 25, Timing 15, Technical 15, Engagement 10. Each is capped at its budget. Grades are A ≥ 72, B ≥ 58, C ≥ 45, then D, with **X** for exclusions (sanctioned country, excluded industry, below 25 employees, do-not-target domain).
 - **Signals decay**: `confidence × relative strength × 0.5^(age/half-life)`. Repeat signals of the same type add only 25% each.
 - **Pure function** with an `inputs_hash`, so scores are reproducible, diffable across ICP versions, and unit-tested (`tests/unit/test_scoring.py`).
 - *Demo:* Kestrel scores 98/A. Its explanation reads like "14 open AI/ML roles, observed 6 days ago… 45-day half-life → 88% of 10 pts."

@@ -140,7 +140,7 @@ def test_invalid_icp_definitions_are_rejected():
 
 
 def test_grades_and_intent_index():
-    assert [grade_for(x) for x in (95, 80, 79, 65, 50, 49)] == ["A", "A", "B", "B", "C", "D"]
+    assert [grade_for(x) for x in (95, 72, 71, 58, 45, 44)] == ["A", "A", "B", "B", "C", "D"]
     quiet = score_account(ICP, STRONG, [], EngagementFacts(), NOW)
     hot = score_account(
         ICP, STRONG, [sig("ai_hiring_surge", 1), sig("funding_round", 1, i="s2")], EngagementFacts(meetings_90d=1), NOW

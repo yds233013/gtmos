@@ -53,6 +53,8 @@ markers = ["db: tests that need PostgreSQL"]
 
 [dependency-groups]
 dev = [
+    "dbt-core>=1.12.5",
+    "dbt-postgres>=1.11.0",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
