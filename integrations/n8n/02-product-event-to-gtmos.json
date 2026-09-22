@@ -1,0 +1,65 @@
+{
+  "name": "GTMOS · PostHog product event → GTMOS",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0002-4c3e-9a10-000000000001",
+      "name": "PostHog destination webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "gtmos-posthog",
+      "parameters": { "httpMethod": "POST", "path": "gtmos-posthog", "responseMode": "onReceived", "options": {} }
+    },
+    {
+      "id": "5b1f7a2e-0002-4c3e-9a10-000000000002",
+      "name": "Keep GTM-relevant events",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['workspace_created','signed_up','teammate_invited','integration_connected','trace_volume_threshold','pricing_page_viewed'].includes($json.body.event) }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0002-4c3e-9a10-000000000003",
+      "name": "Forward to GTMOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/webhooks/posthog",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-GTMOS-Webhook-Token", "value": "={{ $env.GTMOS_WEBHOOK_SECRET }}" },
+            { "name": "Idempotency-Key", "value": "={{ $json.body.uuid }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "PostHog destination webhook": { "main": [[{ "node": "Keep GTM-relevant events", "type": "main", "index": 0 }]] },
+    "Keep GTM-relevant events": { "main": [[{ "node": "Forward to GTMOS", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

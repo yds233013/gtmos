@@ -1,0 +1,56 @@
+{
+  "name": "GTMOS · HubSpot company change → GTMOS rescore",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0004-4c3e-9a10-000000000001",
+      "name": "HubSpot change webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "gtmos-hubspot-change",
+      "parameters": { "httpMethod": "POST", "path": "gtmos-hubspot-change", "responseMode": "onReceived", "options": {} }
+    },
+    {
+      "id": "5b1f7a2e-0004-4c3e-9a10-000000000002",
+      "name": "Only fit-relevant properties",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// HubSpot sends batches of change events. Rescore only when a property that feeds the ICP score changed,\n// and never react to GTMOS's own gtmos_* writes (that would loop).\nconst relevant = new Set(['numberofemployees', 'industry', 'country', 'domain']);\nconst events = ($input.first().json.body ?? []).filter(e => relevant.has(e.propertyName));\nreturn events.map(e => ({ json: { gtmos_account_id: e.gtmos_account_id ?? null, domain: e.domain ?? null, objectId: e.objectId } }));"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0004-4c3e-9a10-000000000003",
+      "name": "Find GTMOS account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/accounts?q={{ encodeURIComponent($json.domain) }}&page_size=1",
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0004-4c3e-9a10-000000000004",
+      "name": "Rescore",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/accounts/{{ $json.items[0].id }}/rescore",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "HubSpot change webhook": { "main": [[{ "node": "Only fit-relevant properties", "type": "main", "index": 0 }]] },
+    "Only fit-relevant properties": { "main": [[{ "node": "Find GTMOS account", "type": "main", "index": 0 }]] },
+    "Find GTMOS account": { "main": [[{ "node": "Rescore", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

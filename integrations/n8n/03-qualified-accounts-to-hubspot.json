@@ -1,0 +1,93 @@
+{
+  "name": "GTMOS · Hourly: A-grade accounts → HubSpot (via GTMOS reverse ETL)",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000001",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] } }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000002",
+      "name": "Preview reverse-ETL diff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/integrations/hubspot/reverse-etl/preview?limit=5",
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000003",
+      "name": "Anything changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.would_create + $json.would_update }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000004",
+      "name": "Run reverse-ETL sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, -80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/integrations/hubspot/reverse-etl/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.GTMOS_ADMIN_TOKEN }}" }]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000005",
+      "name": "Alert on failed records",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, -80],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.records_failed }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Every hour": { "main": [[{ "node": "Preview reverse-ETL diff", "type": "main", "index": 0 }]] },
+    "Preview reverse-ETL diff": { "main": [[{ "node": "Anything changed?", "type": "main", "index": 0 }]] },
+    "Anything changed?": { "main": [[{ "node": "Run reverse-ETL sync", "type": "main", "index": 0 }], []] },
+    "Run reverse-ETL sync": { "main": [[{ "node": "Alert on failed records", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

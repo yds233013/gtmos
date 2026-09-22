@@ -1,0 +1,72 @@
+{
+  "name": "GTMOS · External buying signal → GTMOS (signed)",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0001-4c3e-9a10-000000000001",
+      "name": "Signal webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "gtmos-signal-intake",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gtmos-signal-intake",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0001-4c3e-9a10-000000000002",
+      "name": "Map to GTMOS signal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Normalize an incoming alert (e.g. a funding-news feed) into the GTMOS signal contract.\n// source_ref must be stable per real-world event: GTMOS dedupes on it.\nconst b = $input.first().json.body ?? $input.first().json;\nreturn [{ json: {\n  account_domain: b.domain,\n  signal_type: b.type ?? 'funding_round',\n  title: b.title,\n  explanation: b.summary ?? b.title,\n  source: 'n8n:' + (b.feed ?? 'external'),\n  source_ref: String(b.id ?? b.url ?? b.title),\n  source_url: b.url ?? null,\n  confidence: Number(b.confidence ?? 0.85)\n}}];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0001-4c3e-9a10-000000000003",
+      "name": "Sign request (HMAC-SHA256)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// X-GTMOS-Signature = sha256=HMAC(secret, `${timestamp}.${rawBody}`); GTMOS rejects >5 min skew.\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json);\nconst ts = Math.floor(Date.now() / 1000).toString();\nconst secret = $env.GTMOS_WEBHOOK_SECRET;\nconst sig = 'sha256=' + crypto.createHmac('sha256', secret).update(ts + '.' + body).digest('hex');\nreturn [{ json: { body, ts, sig } }];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0001-4c3e-9a10-000000000004",
+      "name": "POST to GTMOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/webhooks/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-GTMOS-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-GTMOS-Signature", "value": "={{ $json.sig }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": { "response": { "response": { "neverError": false } } }
+      }
+    }
+  ],
+  "connections": {
+    "Signal webhook": { "main": [[{ "node": "Map to GTMOS signal", "type": "main", "index": 0 }]] },
+    "Map to GTMOS signal": { "main": [[{ "node": "Sign request (HMAC-SHA256)", "type": "main", "index": 0 }]] },
+    "Sign request (HMAC-SHA256)": { "main": [[{ "node": "POST to GTMOS", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}
