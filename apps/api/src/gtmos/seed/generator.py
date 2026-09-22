@@ -25,7 +25,9 @@ from sqlalchemy.orm import Session
 
 from gtmos.domain.experiments import assign_variant
 from gtmos.domain.icp import default_icp
+from gtmos.domain.personalization import PersonalizationInput, generate_messages
 from gtmos.domain.pipeline import FUNNEL_TO_LIFECYCLE
+from gtmos.domain.research import ANGLES
 from gtmos.domain.rules import Condition, evaluate_all
 from gtmos.domain.signals import SIGNAL_TYPES, signal_dedupe_key
 from gtmos.domain.workflows import DEFAULT_WORKFLOWS
@@ -44,6 +46,7 @@ from gtmos.models import (
     ICPProfile,
     Integration,
     IntegrationSync,
+    MessageDraft,
     Opportunity,
     PipelineStage,
     RoutingRule,
@@ -315,6 +318,7 @@ class Ctx:
     opp_rows: list[dict[str, Any]] = field(default_factory=list)
     assignment_rows: list[dict[str, Any]] = field(default_factory=list)
     outcome_rows: list[dict[str, Any]] = field(default_factory=list)
+    draft_rows: list[dict[str, Any]] = field(default_factory=list)
     counter: int = 0
 
     def d(self, days: float) -> datetime:
@@ -1196,6 +1200,7 @@ def _activity(
     summary: str | None = None,
     user_id: uuid.UUID | None = None,
     props: dict[str, Any] | None = None,
+    draft_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     row = {
         "id": uid("activity", c.key("act")),
@@ -1208,7 +1213,7 @@ def _activity(
         "occurred_at": c.d(days),
         "campaign_id": c.campaigns[campaign].id if campaign else None,
         "sequence_step_id": step.id if step else None,
-        "message_draft_id": None,
+        "message_draft_id": draft_id,
         "subject": subject,
         "summary": summary,
         "status": None,
@@ -1247,6 +1252,82 @@ def _propensity(p: CompanyProfile, a: Account) -> float:
     fit = core.get(p.industry, 0.4)
     size = 1.0 if 250 <= p.employee_count <= 5000 else (0.7 if 100 <= p.employee_count <= 10000 else 0.35)
     return max(0.02, min(1.0, 0.45 * p.ai_maturity + 0.3 * fit + 0.25 * size))
+
+
+# Campaigns whose first step is AI-personalised per account. Template-only motions (the generic ICP campaign
+# and the funding-trigger control arm) send the sequence template, so they have a sequence step but no draft.
+PERSONALISED_CAMPAIGNS = {"agent-launch", "plg-to-prod"}
+ANGLE_SIGNAL_TYPES = {spec[1] for spec in ANGLES.values()}
+SENDER_NAME = "Jordan Lee, Sentinel AI"
+
+
+def _historical_draft(c: Ctx, a: Account, contact: Contact, camp: str, when: float, approver: User) -> uuid.UUID | None:
+    """Recreate the approved draft that produced a historical send, using the real personalization engine.
+
+    Seeded history is demo data, but it is produced by the same code path the live product uses, so the
+    lineage (evidence → draft → guardrails → approval → send) is genuine rather than decorative.
+    """
+    sigs = sorted(c.signals[a.id], key=lambda s: s["observed_at"], reverse=True)
+    anchor = next((s for s in sigs if s["signal_type"] in ANGLE_SIGNAL_TYPES), None)
+    if anchor is None:
+        return None
+    angle = next(k for k, v in ANGLES.items() if v[1] == anchor["signal_type"])
+    ev = [{"ref": "E1", "label": anchor["title"], "detail": anchor["explanation"]}]
+    inp = PersonalizationInput(
+        account={"name": a.name},
+        contact={
+            "first_name": contact.first_name,
+            "name": contact.full_name,
+            "title": contact.title,
+            "email_status": contact.email_status,
+            "do_not_contact": contact.do_not_contact,
+        },
+        angle=angle,
+        anchor_signal={
+            "id": str(anchor["id"]),
+            "title": anchor["title"],
+            "short": (anchor["evidence"] or {}).get("short") or anchor["title"].lower(),
+            "subject_hook": (anchor["evidence"] or {}).get("hook") or a.name,
+            "confidence": anchor["confidence"],
+            "observed_at": anchor["observed_at"],
+            "ref": "E1",
+        },
+        evidence=ev,
+        sender_name=SENDER_NAME,
+        now=c.d(when),
+    )
+    email = next((d for d in generate_messages(inp) if d.channel == "email"), None)
+    if email is None or email.blocked:
+        return None
+    draft_id = uid("draft", f"{a.id}:{contact.id}:{camp}")
+    c.draft_rows.append(
+        {
+            "id": draft_id,
+            "workspace_id": c.ws.id,
+            "account_id": a.id,
+            "contact_id": contact.id,
+            "campaign_id": c.campaigns[camp].id,
+            "research_report_id": None,
+            "channel": "email",
+            "subject": email.subject,
+            "body": email.body,
+            "angle": email.angle,
+            "reasoning_chain": jsonable(email.chain),
+            "evidence": ev,
+            "guardrails": email.guardrails_json(),
+            "status": "ready",
+            "generator": "demo-deterministic",
+            "version": 1,
+            "reviewed_by": approver.email,
+            "approved_by": approver.email,
+            "approved_at": c.d(when - 0.2),
+            "rejection_reason": None,
+            "workflow_run_id": None,
+            "created_at": c.d(when - 0.5),
+            "updated_at": c.d(when - 0.2),
+        }
+    )
+    return draft_id
 
 
 def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
@@ -1323,7 +1404,56 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
         return
     step_key = f"{camp}:{variant_key}" if camp == "funding-trigger" else camp
     steps = c.steps[step_key]
-    _transition(c, a, "contacted", enroll, f"Enrolled in campaign '{c.campaigns[camp].name}'")
+
+    # Earlier nurture touch for roughly a third of accounts, so journeys are genuinely multi-touch and the
+    # attribution models have something to disagree about (first touch ≠ last touch).
+    first_touch = enroll
+    if rng.random() < 0.35:
+        if camp != "icp-generic":
+            prior_at = enroll - rng.uniform(25, 100)
+            if prior_at > -178:
+                first_touch = prior_at
+                for t in targets[:1]:
+                    _activity(
+                        c,
+                        a,
+                        "email_sent",
+                        prior_at,
+                        contact=t,
+                        campaign="icp-generic",
+                        step=c.steps["icp-generic"][0],
+                        subject=f"{a.name}: evaluating LLM agents",
+                    )
+                    _activity(
+                        c,
+                        a,
+                        "email_delivered",
+                        prior_at + 0.001,
+                        contact=t,
+                        campaign="icp-generic",
+                        step=c.steps["icp-generic"][0],
+                    )
+        elif enroll > -96:
+            first_touch = -100.0
+            for t in targets[:1]:
+                _activity(
+                    c,
+                    a,
+                    "webinar_attended",
+                    -100.0,
+                    contact=t,
+                    campaign="webinar-agents",
+                    channel="event",
+                    subject="Webinar: Evaluating LLM agents in production",
+                )
+    _transition(c, a, "contacted", first_touch, f"First touch; later enrolled in '{c.campaigns[camp].name}'")
+
+    approver = c.users["riley"]
+    personalised = camp in PERSONALISED_CAMPAIGNS or (camp == "funding-trigger" and variant_key == "treatment")
+    drafts_by_contact: dict[uuid.UUID, uuid.UUID | None] = {}
+    if personalised:
+        for t in targets:
+            drafts_by_contact[t.id] = _historical_draft(c, a, t, camp, enroll, approver)
     mult = REPLY_MULTIPLIER.get(f"{camp}:{variant_key}" if camp == "funding-trigger" else camp, 1.0)
     if camp == "agent-launch" and variant_key == "treatment":
         mult *= 1.1
@@ -1341,7 +1471,17 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
             if replied_at is not None and d > replied_at:
                 break
             subj = (st.subject_template or "").replace("{hook}", a.name)
-            _activity(c, a, "email_sent", d, contact=t, campaign=camp, step=st, subject=subj)
+            _activity(
+                c,
+                a,
+                "email_sent",
+                d,
+                contact=t,
+                campaign=camp,
+                step=st,
+                subject=subj,
+                draft_id=drafts_by_contact.get(t.id) if st.step_number == 1 else None,
+            )
             if rng.random() < 0.97:
                 _activity(c, a, "email_delivered", d + 0.001, contact=t, campaign=camp, step=st, subject=subj)
                 if rng.random() < 0.42:
@@ -1520,6 +1660,75 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
                 "occurred_at": c.d(opened),
                 "source_activity_id": None,
                 "note": "value = opportunity amount (USD)",
+            }
+        )
+
+
+def _inbound_opportunities(c: Ctx, candidates: list[Account]) -> None:
+    """Inbound/referral deals with no recorded GTMOS touches.
+
+    Every real attribution report has an unattributed tail: demo requests, referrals, events and conversations
+    that never touch the system of record. Modelling it keeps the attribution page honest, and gives the
+    'what share of pipeline can we even attribute?' conversation something to bite on.
+    """
+    rng = random.Random(RNG_SEED + 31)
+    pool = [a for a in candidates if a.funnel_stage == "prospect" and not a.is_customer and a.domain]
+    for a in rng.sample(pool, min(16, len(pool))):
+        opened = -rng.uniform(5, 150)
+        source = rng.choice(["inbound", "referral", "partner"])
+        reason = {
+            "inbound": "Inbound demo request (form fill logged in the CRM, no GTMOS touches)",
+            "referral": "Referred by an existing customer; conversation happened over email outside GTMOS",
+            "partner": "Partner-sourced introduction",
+        }[source]
+        for stage, dd in (
+            ("qualified", opened - rng.uniform(6, 20)),
+            ("meeting", opened - rng.uniform(2, 5)),
+            ("opportunity", opened),
+        ):
+            _transition(c, a, stage, dd, reason, by="crm_manual")
+        _activity(
+            c,
+            a,
+            "note",
+            opened - 0.5,
+            channel=None,
+            subject="Inbound request",
+            summary=reason,
+        )
+        lo, hi = OPP_AMOUNT.get(a.segment or "mid_market", (30_000, 70_000))
+        amount = round(rng.uniform(lo, hi) / 1000) * 1000
+        stage, closed_at, lost_reason = "evaluation", None, None
+        if -opened > 45 and rng.random() < 0.55:
+            close_d = opened + rng.uniform(25, min(-opened, 90))
+            if close_d < 0:
+                if rng.random() < 0.45:
+                    stage, closed_at = "closed_won", close_d
+                    _transition(c, a, "won", close_d, "Closed won (inbound)")
+                    a.is_customer = True
+                else:
+                    stage, closed_at = "closed_lost", close_d
+                    lost_reason = rng.choice(["No budget", "Timing", "Chose competitor"])
+                    _transition(c, a, "lost", close_d, f"Closed lost: {lost_reason}")
+        c.opp_rows.append(
+            {
+                "id": uid("opp", f"inbound:{a.id}"),
+                "workspace_id": c.ws.id,
+                "account_id": a.id,
+                "name": f"{a.name}: Agent Reliability Platform",
+                "stage": stage,
+                "amount_usd": amount,
+                "opened_at": c.d(opened),
+                "expected_close_date": c.d(opened + 60).date(),
+                "closed_at": c.d(closed_at) if closed_at is not None else None,
+                "owner_id": None,
+                "primary_contact_id": None,
+                "source_campaign_id": None,
+                "lead_source": source,
+                "lost_reason": lost_reason,
+                "data_origin": "demo",
+                "created_at": c.d(opened),
+                "updated_at": c.d(opened),
             }
         )
 
@@ -1725,10 +1934,78 @@ def _flagship(c: Ctx, a: Account) -> None:
         force={"signup": -16, "invite": -11, "integration": -8, "pricing": -3, "threshold": -2},
         user=ct["Priya"],
     )
-    # Journey: agent-launch campaign → reply → meeting → opportunity.
+    # Journey: webinar → ICP nurture → launch-triggered campaign → reply → meeting → opportunity.
+    # Three campaigns over 100 days is what makes the attribution models disagree on this account.
     priya, tomas = ct["Priya"], ct["Tomás"]
     steps = c.steps["agent-launch"]
-    _transition(c, a, "contacted", -22, "Enrolled in campaign 'AI agent launch → reliability'")
+    for person in (priya, tomas):
+        _activity(
+            c,
+            a,
+            "webinar_attended",
+            -100 + (0.01 if person is tomas else 0),
+            contact=person,
+            campaign="webinar-agents",
+            channel="event",
+            subject="Webinar: Evaluating LLM agents in production",
+            summary="Attended the live session and asked about eval datasets in the Q&A",
+        )
+    _transition(c, a, "contacted", -100, "First touch: attended the LLM agent evaluation webinar")
+    for st, d in zip(c.steps["icp-generic"][:2], (-62, -59), strict=True):
+        _activity(
+            c,
+            a,
+            "email_sent",
+            d,
+            contact=priya,
+            campaign="icp-generic",
+            step=st,
+            subject="Kestrel Analytics: evaluating LLM agents",
+        )
+        _activity(c, a, "email_delivered", d + 0.001, contact=priya, campaign="icp-generic", step=st)
+    _activity(
+        c,
+        a,
+        "email_opened",
+        -61.5,
+        contact=priya,
+        campaign="icp-generic",
+        step=c.steps["icp-generic"][0],
+        props={"caveat": "open tracking unreliable (Apple MPP)"},
+    )
+    flagship_draft = _historical_draft(c, a, priya, "agent-launch", -22, c.users["riley"])
+    variant_key, bucket = assign_variant("exp-subject-v1", str(a.id), [("control", 0.5), ("treatment", 0.5)])
+    var = c.variants["subject-question"][variant_key]
+    assignment_id = uid("assign", f"e2:{a.id}")
+    c.assignment_rows.append(
+        {
+            "id": assignment_id,
+            "experiment_id": var.experiment_id,
+            "variant_id": var.id,
+            "unit_id": a.id,
+            "account_id": a.id,
+            "assigned_at": c.d(-22),
+            "exposed_at": c.d(-22),
+            "bucket": bucket,
+        }
+    )
+    for metric, at, value in (
+        ("reply", -17, 1.0),
+        ("positive_reply", -17, 1.0),
+        ("meeting", -6, 1.0),
+        ("opportunity", -4, 180_000.0),
+    ):
+        c.outcome_rows.append(
+            {
+                "id": uid("outcome", f"{assignment_id}:{metric}"),
+                "assignment_id": assignment_id,
+                "metric": metric,
+                "value": value,
+                "occurred_at": c.d(at),
+                "source_activity_id": None,
+                "note": "value = opportunity amount (USD)" if metric == "opportunity" else None,
+            }
+        )
     for st, d in zip(steps[:2], (-22, -19), strict=True):
         _activity(
             c,
@@ -1739,6 +2016,7 @@ def _flagship(c: Ctx, a: Account) -> None:
             campaign="agent-launch",
             step=st,
             subject="Kestrel Copilot: agent reliability",
+            draft_id=flagship_draft if st.step_number == 1 else None,
         )
         _activity(
             c,
@@ -2131,6 +2409,8 @@ def _workflow_history(c: Ctx) -> None:
         wf = wfs[wf_key]
         steps = wf.definition["steps"]
         for a, s in items:
+            if a.is_flagship:
+                continue  # the flagship's history is produced by really executing the engine (see seed())
             created = s["observed_at"] + timedelta(minutes=rng.uniform(1, 30))
             ctx = {
                 "account": {
@@ -2224,6 +2504,52 @@ def _workflow_history(c: Ctx) -> None:
 # --------------------------------------------------------------------------------------------------
 
 
+def _execute_backdated(
+    db: Session,
+    ws_id: uuid.UUID,
+    account: Account,
+    signal: dict[str, Any],
+    when: datetime,
+    trigger: str = "signal.created",
+) -> int:
+    """Run a workflow for real, then move its timestamps back to when the signal actually arrived.
+
+    Seeded history is otherwise fabricated: rows that claim a run happened without one ever running. Here the
+    engine really executes (real enrichment attempts, real committee inference, real CRM upsert) and only the
+    clock is moved, which the run records as `backdated` so the UI can say so.
+    """
+    from gtmos.models import WorkflowStepRun
+    from gtmos.services.workflow_engine import emit_event
+
+    payload: dict[str, Any] = {
+        "signal": {
+            "id": str(signal["id"]),
+            "signal_type": signal["signal_type"],
+            "title": signal["title"],
+            "observed_at": signal["observed_at"].isoformat(),
+        }
+    }
+    if trigger == "product.pql":
+        payload["pql"] = {"event": signal["signal_type"], "signal_id": str(signal["id"])}
+    runs = emit_event(db, ws_id, trigger, str(signal["id"]), account, payload, data_origin="demo")
+    for run in runs:
+        span = (run.finished_at - run.started_at) if run.started_at and run.finished_at else timedelta(seconds=5)
+        run.created_at = when
+        run.started_at = when
+        run.finished_at = when + span
+        run.trigger_event = {**(run.trigger_event or {}), "backdated": True}
+        offset = when
+        for step in db.scalars(
+            select(WorkflowStepRun).where(WorkflowStepRun.run_id == run.id).order_by(WorkflowStepRun.position)
+        ):
+            dur = timedelta(milliseconds=step.duration_ms or 0)
+            step.started_at = offset
+            step.finished_at = offset + dur
+            offset += dur
+    db.flush()
+    return len(runs)
+
+
 def seed(
     db: Session, size: int = 2000, anchor: datetime | None = None, execute_live_workflows: int = 12
 ) -> dict[str, Any]:
@@ -2279,6 +2605,7 @@ def seed(
         if c.rng.random() < 0.06:
             _webinar(c, a)
         _journey(c, a, p)
+    _inbound_opportunities(c, [a for a in c.accounts[1:] if a.id not in customers])
     defect_counts = _inject_defects(c)
 
     db.flush()
@@ -2295,6 +2622,7 @@ def seed(
         (c.signal_rows, Signal),
         (c.engagement_rows, Engagement),
         (c.transition_rows, StageTransition),
+        (c.draft_rows, MessageDraft),  # before activities: sends reference the draft that produced them
         (c.activity_rows, Activity),
         (c.opp_rows, Opportunity),
         (c.assignment_rows, ExperimentAssignment),
@@ -2423,6 +2751,13 @@ def seed(
             data_origin="demo",
         )
         executed += len(runs)
+
+    # The flagship's own history: really executed, then backdated to the signals that triggered it. The
+    # funding → outreach workflow is deliberately left un-run so the demo can trigger it live.
+    for sig_type, minutes in (("ai_hiring_surge", 14), ("usage_threshold", 9)):
+        sig = next((x for x in c.signals[flagship.id] if x["signal_type"] == sig_type), None)
+        if sig is not None:
+            executed += _execute_backdated(db, ws.id, flagship, sig, sig["observed_at"] + timedelta(minutes=minutes))
 
     sync = run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="seed")
     dq = data_quality.scan(db, ws.id, write_audit=False)

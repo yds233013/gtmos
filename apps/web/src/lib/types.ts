@@ -405,8 +405,27 @@ export interface Overview {
 
 export interface Funnel {
   window_days: number;
-  stages: { stage: string; accounts: number; conversion_from_previous: number | null }[];
+  cohort_size: number;
+  cohort_definition: string;
+  universe: { accounts: number; icp_accounts: number };
+  stages: {
+    stage: string;
+    accounts: number;
+    conversion_from_previous: number | null;
+    conversion_from_cohort: number | null;
+  }[];
   lost: number;
+  note: string;
+}
+
+export interface MetricDefinition {
+  key: string;
+  label: string;
+  category: string;
+  definition: string;
+  formula: string;
+  denominator: string;
+  caveat: string;
 }
 
 export interface BreakdownRow {

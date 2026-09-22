@@ -12,9 +12,32 @@ import { ErrorState } from "@/components/ui/states";
 import { Table, Td, Th, THead, Tr } from "@/components/ui/table";
 import { api, settle } from "@/lib/api";
 import { money, num, pct, relTime, titleCase } from "@/lib/format";
-import type { AccountRow, Breakdown, Funnel, Inspector, Overview, Paged, PipelineTrend, Signal, Workspace } from "@/lib/types";
+import { MetricDefinitions } from "@/components/insights/metric-definitions";
+import type {
+  AccountRow,
+  Breakdown,
+  Funnel,
+  Inspector,
+  MetricDefinition,
+  Overview,
+  Paged,
+  PipelineTrend,
+  Signal,
+  Workspace,
+} from "@/lib/types";
 
 export const metadata = { title: "Overview" };
+
+const SYSTEMS: { href: string; label: string; hint: string }[] = [
+  { href: "/scoring", label: "Explainable scoring", hint: "Deterministic 100-point model; every point traces to a rule" },
+  { href: "/accounts", label: "Enrichment waterfall", hint: "Per-field provider order, confidence, cost and provenance" },
+  { href: "/signals", label: "Signal engine", hint: "13 signal types with half-life decay" },
+  { href: "/workflows", label: "Idempotent workflows", hint: "Trigger → conditions → actions, retries, dead letters" },
+  { href: "/routing", label: "Routing engine", hint: "Priority rules, conflict resolution, capacity" },
+  { href: "/settings?tab=reverse-etl", label: "CRM reverse ETL", hint: "Change detection and idempotent upserts" },
+  { href: "/approvals", label: "AI guardrails", hint: "Evidence-grounded drafts, human approval" },
+  { href: "/data-quality", label: "Data quality", hint: "11 rules with audited remediation" },
+];
 
 const DEMO_PATH: { href: (ws: Workspace | null) => string; label: string }[] = [
   { href: (ws) => (ws?.flagship_account_id ? `/accounts/${ws.flagship_account_id}` : "/accounts"), label: "Open the flagship account (Kestrel Analytics)" },
@@ -25,7 +48,7 @@ const DEMO_PATH: { href: (ws: Workspace | null) => string; label: string }[] = [
 ];
 
 export default async function OverviewPage() {
-  const [ws, overview, funnel, trend, top, signals, inspector, grades] = await settle(
+  const [ws, overview, funnel, trend, top, signals, inspector, grades, metricDefs] = await settle(
     api<Workspace>("/workspace"),
     api<Overview>("/analytics/overview?days=90"),
     api<Funnel>("/analytics/funnel?days=90"),
@@ -34,6 +57,7 @@ export default async function OverviewPage() {
     api<Paged<Signal>>("/signals?days=14&page_size=6&min_confidence=0.8"),
     api<Inspector>("/stack-inspector"),
     api<{ rows: Breakdown["rows"]; note: string }>("/analytics/score-validation"),
+    api<{ metrics: MetricDefinition[] }>("/analytics/metrics"),
   );
 
   if (!overview) {
@@ -51,8 +75,27 @@ export default async function OverviewPage() {
             {ws?.seller_name ?? "GTMOS"} · last {o.window_days} days <DemoBadge />
           </span>
         }
-        description="Which accounts to target, why now, what to say, and whether the go-to-market machine is healthy. Every number below is computed live from the GTMOS database."
+        description={
+          <>
+            GTMOS decides <strong className="text-text">which accounts to work, why now and what to say</strong>, then
+            routes them, syncs the CRM and measures what happened. Sales teams lose pipeline in the gaps between those
+            steps; this is the infrastructure that closes them. Every number below is computed live from the database.
+          </>
+        }
       />
+
+      <nav aria-label="Engineering systems" className="-mt-2 flex flex-wrap gap-1.5 text-xs">
+        {SYSTEMS.map((s) => (
+          <Link
+            key={s.href}
+            href={s.href}
+            className="rounded border border-border px-2 py-1 text-muted transition-colors hover:border-accent hover:text-accent-text"
+            title={s.hint}
+          >
+            {s.label}
+          </Link>
+        ))}
+      </nav>
 
       <StatGrid>
         <StatCell label="Accounts in universe" value={num(o.accounts_sourced)} sub={`${pct(o.enrichment_coverage, 0)} fully enriched`} />
@@ -77,8 +120,18 @@ export default async function OverviewPage() {
           )}
           <p className="mt-2 text-[11px] text-muted">{trend?.note}</p>
         </Panel>
-        <Panel title="Funnel" description="Accounts reaching each stage · 90 days">
-          {funnel ? <FunnelBars stages={funnel.stages} /> : <p className="text-xs text-muted">Unavailable.</p>}
+        <Panel
+          title="Cohort funnel"
+          description={funnel ? `${num(funnel.cohort_size)} accounts first contacted in 90 days` : "90 days"}
+        >
+          {funnel ? (
+            <>
+              <FunnelBars stages={funnel.stages} />
+              <p className="mt-2 text-[11px] text-muted">{funnel.cohort_definition}</p>
+            </>
+          ) : (
+            <p className="text-xs text-muted">Unavailable.</p>
+          )}
         </Panel>
       </div>
 
@@ -246,6 +299,8 @@ export default async function OverviewPage() {
         </div>
         <p className="mt-3 text-[11px] text-muted">{o.open_rate_caveat}</p>
       </Panel>
+
+      <MetricDefinitions metrics={metricDefs?.metrics ?? []} />
     </div>
   );
 }

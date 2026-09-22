@@ -204,8 +204,12 @@ export default async function PipelinePage(props: PageProps<"/pipeline">) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel
-          title="Funnel conversion and time between stages"
-          description="Accounts reaching each stage (90 days) and median days from the previous stage (180 days)"
+          title="Cohort funnel and time between stages"
+          description={
+            funnel
+              ? `${num(funnel.cohort_size)} accounts first contacted in 90 days · median days from the previous stage (180 days)`
+              : "Median days from the previous stage (180 days)"
+          }
           className="lg:col-span-2"
           bodyClassName="p-0"
         >
@@ -214,8 +218,9 @@ export default async function PipelinePage(props: PageProps<"/pipeline">) {
               <THead>
                 <tr>
                   <Th>Stage</Th>
-                  <Th align="right">Reached · 90d</Th>
+                  <Th align="right">Reached</Th>
                   <Th align="right">Step conversion</Th>
+                  <Th align="right">Of cohort</Th>
                   <Th align="right">Median days from previous · 180d</Th>
                   <Th align="right">Transitions measured</Th>
                 </tr>
@@ -232,6 +237,11 @@ export default async function PipelinePage(props: PageProps<"/pipeline">) {
                       </Td>
                       <Td align="right" className="text-xs text-muted">
                         {s.conversion_from_previous === null ? "—" : pct(s.conversion_from_previous, 0)}
+                      </Td>
+                      <Td align="right" className="text-xs text-subtle">
+                        {"conversion_from_cohort" in s && s.conversion_from_cohort != null
+                          ? pct(s.conversion_from_cohort, 0)
+                          : "—"}
                       </Td>
                       <Td align="right" className="text-xs">
                         {dur ? (
@@ -257,7 +267,8 @@ export default async function PipelinePage(props: PageProps<"/pipeline">) {
             <p className="p-4 text-xs text-muted">Funnel and velocity data are unavailable.</p>
           )}
           <p className="border-t border-border px-4 py-2.5 text-[11px] text-muted">
-            Account funnel stages, not deal stages. Medians with fewer than {MIN_SAMPLE} measured transitions are marked as small samples.
+            {funnel?.cohort_definition ?? ""} Account funnel stages, not deal stages. Medians with fewer than{" "}
+            {MIN_SAMPLE} measured transitions are marked as small samples.
             {funnel ? ` ${num(funnel.lost)} accounts were marked lost in the last 90 days.` : ""}
           </p>
         </Panel>

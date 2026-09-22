@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gtmos.api.deps import actor, db_session, parse_uuid, row, workspace
+from gtmos.domain import metrics
 from gtmos.domain.routing import route as route_rules
 from gtmos.domain.workflows import ACTIONS
 from gtmos.models import (
@@ -308,6 +309,12 @@ def overview(
     days: int = Query(90, ge=7, le=365), db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
 ) -> dict[str, Any]:
     return analytics.overview(db, ws.id, days)
+
+
+@router.get("/analytics/metrics")
+def metric_definitions() -> dict[str, Any]:
+    """The metric dictionary: how every reported number is defined, and how it can be misread."""
+    return {"metrics": metrics.as_list()}
 
 
 @router.get("/analytics/funnel")

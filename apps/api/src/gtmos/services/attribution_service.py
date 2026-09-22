@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gtmos.domain.attribution import MODELS, OpportunityFacts, Touch, attribute
-from gtmos.models import Activity, Campaign, Opportunity
+from gtmos.models import Account, Activity, Campaign, Opportunity
 from gtmos.services.common import utcnow
 
 # Activities that count as marketing/sales touches. Opens are excluded (unreliable).
@@ -59,6 +59,58 @@ def run(db: Session, ws: uuid.UUID, days: int = 180) -> dict[str, Any]:
         for k in keys
     ]
     table.sort(key=lambda r: -r["linear"])
+
+    # Spotlight: the opportunity whose credit moves most between models. Attribution arguments are easiest to
+    # have in front of a concrete deal, not a summary table.
+    accounts = dict(db.execute(select(Account.id, Account.name).where(Account.id.in_(list(acct_opps)))).tuples().all())
+    opp_by_id = {str(o.id): o for o in opps}
+    spotlight: dict[str, Any] | None = None
+    best_spread = 0.0
+    for oid, o in opp_by_id.items():
+        per_model = {m: dict(results[m].details.get(oid, [])) for m in MODELS}
+        sources = sorted({k for credits in per_model.values() for k in credits})
+        if len(sources) < 2 or not o.amount_usd:
+            continue
+        spread = max(
+            abs(per_model["first_touch"].get(src, 0.0) - per_model["last_touch"].get(src, 0.0)) for src in sources
+        )
+        if spread > best_spread:
+            best_spread = spread
+            touch_list = sorted(touches_by_opp.get(oid, []), key=lambda t: t.occurred_at)
+            spotlight = {
+                "opportunity_id": oid,
+                "opportunity": o.name,
+                "account_id": str(o.account_id),
+                "account": accounts.get(o.account_id),
+                "amount": float(o.amount_usd or 0),
+                "opened_at": o.opened_at,
+                "won": o.stage == "closed_won",
+                "touches": [
+                    {
+                        "source": t.key,
+                        "occurred_at": t.occurred_at,
+                        "days_before_open": round((o.opened_at - t.occurred_at).total_seconds() / 86400, 1),
+                    }
+                    for t in touch_list
+                ],
+                "credit": {
+                    m: [
+                        {
+                            "source": src,
+                            "share": round(per_model[m].get(src, 0.0), 4),
+                            "amount": round(float(o.amount_usd or 0) * per_model[m].get(src, 0.0), 2),
+                        }
+                        for src in sources
+                    ]
+                    for m in MODELS
+                },
+                "disagreement": (
+                    "First touch credits the campaign that started the relationship; last touch credits the one "
+                    "that was closest to the opportunity. Both are conventions, not measurements: only the "
+                    "experiment page can support a causal claim."
+                ),
+            }
+
     first = results["first_touch"]
     total = first.total_pipeline
     return {
@@ -70,6 +122,8 @@ def run(db: Session, ws: uuid.UUID, days: int = 180) -> dict[str, Any]:
         "unattributed_pipeline": first.unattributed_pipeline,
         "attributed_share": round(1 - first.unattributed_pipeline / total, 4) if total else None,
         "rows": table,
+        "details": {oid: dict(results["linear"].details.get(oid, [])) for oid in opp_by_id},
+        "spotlight": spotlight,
         "limitations": [
             "Touches are GTMOS-recorded activities only; offline, partner, word-of-mouth and ad touches are invisible.",
             "Account-level: every contact's touches at the account count toward the account's opportunities.",

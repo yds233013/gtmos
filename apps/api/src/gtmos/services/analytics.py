@@ -165,32 +165,78 @@ def overview(db: Session, ws: uuid.UUID, days: int = 90) -> dict[str, Any]:
     }
 
 
-def funnel(db: Session, ws: uuid.UUID, days: int = 90) -> dict[str, Any]:
-    """Distinct accounts that *reached* each stage within the window, with step conversion."""
-    since = _since(days)
-    rows = dict(
+def _first_contact_dates(db: Session, ws: uuid.UUID) -> dict[uuid.UUID, datetime]:
+    """First time each account was ever contacted, which anchors every cohort calculation."""
+    rows = (
         db.execute(
-            select(StageTransition.to_stage, func.count(distinct(StageTransition.entity_id)))
+            select(StageTransition.entity_id, func.min(StageTransition.changed_at))
             .where(
                 StageTransition.workspace_id == ws,
                 StageTransition.pipeline == "funnel",
-                StageTransition.changed_at >= since,
+                StageTransition.to_stage == "contacted",
             )
-            .group_by(StageTransition.to_stage)
+            .group_by(StageTransition.entity_id)
         )
         .tuples()
         .all()
     )
-    stages = []
-    prev = None
+    return dict(rows)
+
+
+def funnel(db: Session, ws: uuid.UUID, days: int = 90) -> dict[str, Any]:
+    """Cohort funnel: accounts first contacted inside the window, and how far they have since progressed.
+
+    Cohort semantics matter. Counting "all accounts" as the top of the funnel and "accounts that reached a
+    stage during the window" below it mixes denominators and invents a conversion rate that means nothing.
+    Here the denominator is fixed (the contacted cohort) and stages are counted whenever they happened, so
+    an account contacted late in the window still counts if it books a meeting next week.
+    """
+    since = _since(days)
+    first_contact = _first_contact_dates(db, ws)
+    cohort = {eid for eid, at in first_contact.items() if at >= since}
+    reached: dict[str, set[uuid.UUID]] = defaultdict(set)
+    if cohort:
+        for eid, stage in db.execute(
+            select(StageTransition.entity_id, StageTransition.to_stage).where(
+                StageTransition.workspace_id == ws,
+                StageTransition.pipeline == "funnel",
+                StageTransition.entity_id.in_(list(cohort)),
+            )
+        ):
+            reached[stage].add(eid)
+    universe = db.scalar(select(func.count()).select_from(Account).where(_live(ws))) or 0
+    icp = (
+        db.scalar(select(func.count()).select_from(Account).where(_live(ws), Account.score_grade.in_(["A", "B"]))) or 0
+    )
+    stages: list[dict[str, Any]] = []
+    prev: int | None = None
+    cohort_size = len(cohort)
     for s in FUNNEL_ORDER:
         if s == "prospect":
-            n = db.scalar(select(func.count()).select_from(Account).where(_live(ws))) or 0
-        else:
-            n = rows.get(s, 0)
-        stages.append({"stage": s, "accounts": n, "conversion_from_previous": round(n / prev, 4) if prev else None})
+            continue
+        n = len(reached.get(s, ()))
+        stages.append(
+            {
+                "stage": s,
+                "accounts": n,
+                "conversion_from_previous": round(n / prev, 4) if prev else None,
+                "conversion_from_cohort": round(n / cohort_size, 4) if cohort_size else None,
+            }
+        )
         prev = n if n else prev
-    return {"window_days": days, "stages": stages, "lost": rows.get("lost", 0)}
+    return {
+        "window_days": days,
+        "cohort_size": cohort_size,
+        "cohort_definition": (
+            f"Accounts whose first outbound touch happened in the last {days} days "
+            f"({cohort_size} accounts). Later stages are counted whenever they occurred, including after "
+            "the window, so the cohort denominator stays fixed."
+        ),
+        "universe": {"accounts": universe, "icp_accounts": icp},
+        "stages": stages,
+        "lost": len(reached.get("lost", ())),
+        "note": "Stages can be skipped, so step conversion is indicative rather than strictly sequential.",
+    }
 
 
 def _stage_reached(db: Session, ws: uuid.UUID, since: datetime) -> dict[uuid.UUID, set[str]]:
