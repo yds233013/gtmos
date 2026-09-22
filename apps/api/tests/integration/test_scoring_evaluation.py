@@ -31,9 +31,7 @@ def test_every_variant_reports_an_interval_and_its_leakage(client):
         # The product's headline score includes engagement, which is downstream of the outcome, so the
         # report must publish the gap rather than the flattering number alone.
         assert outcome["leakage_delta"]["available"] is True
-        assert outcome["leakage_delta"]["delta"] == round(
-            variants["total"]["auc"] - variants["structural"]["auc"], 4
-        )
+        assert outcome["leakage_delta"]["delta"] == round(variants["total"]["auc"] - variants["structural"]["auc"], 4)
 
 
 def test_both_biased_estimates_of_the_selection_effect_are_published(client):
@@ -65,7 +63,10 @@ def test_grade_bands_are_actionable_sizes(client):
 
 def test_meeting_rate_rises_with_grade(client):
     """The bands must at least order conversion correctly, or they are decoration."""
-    by_grade = {b["label"]: b for b in client.get("/api/v1/analytics/scoring-evaluation").json()["outcomes"]["meeting"]["by_grade"]}
+    by_grade = {
+        b["label"]: b
+        for b in client.get("/api/v1/analytics/scoring-evaluation").json()["outcomes"]["meeting"]["by_grade"]
+    }
     rates = [by_grade[g]["rate"] for g in ("A", "B", "C", "D") if g in by_grade]
     assert rates == sorted(rates, reverse=True), f"grade → meeting rate is not monotonic: {rates}"
 

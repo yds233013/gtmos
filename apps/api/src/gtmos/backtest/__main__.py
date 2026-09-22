@@ -64,7 +64,8 @@ def render(report: dict[str, Any]) -> str:
     for _key, o in report["outcomes"].items():
         lines += ["", f"## Outcome: {o['label']}", "", f"_{o['definition']}_", "", "### By grade", ""]
         lines += _bucket_table(o["by_grade"], "Grade")
-        lines += ["", "### By score variant", "", "| Variant | AUC | 95% CI | Leakage |", "| --- | ---: | :---: | --- |"]
+        lines += ["", "### By score variant", ""]
+        lines += ["| Variant | AUC | 95% CI | Leakage |", "| --- | ---: | :---: | --- |"]
         for v in o["variants"].values():
             ci = v["auc_ci"]
             ci_text = f"{ci[0]:.3f}–{ci[1]:.3f}" if ci else "—"
@@ -87,7 +88,8 @@ def render(report: dict[str, Any]) -> str:
         structural = o["variants"]["structural"]
         lines += ["", "### Working the list top-down (structural score)", ""]
         lines += _bucket_table(structural["buckets"], "Bin")
-        lines += ["", "| Top K | Converted | Precision | Expected at random | Lift | Recall |", "| ---: | ---: | ---: | ---: | ---: | ---: |"]
+        lines += ["", "| Top K | Converted | Precision | Expected at random | Lift | Recall |"]
+        lines += ["| ---: | ---: | ---: | ---: | ---: | ---: |"]
         for p in structural["precision_at_k"]:
             lines.append(
                 f"| {p['k']} | {p['hits']} | {_pct(p['precision'])} | {p['random_expected']} | "

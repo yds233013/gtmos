@@ -175,7 +175,7 @@ sequenceDiagram
 
 > **Known deviation.** HubSpot decodes only a fixed set of percent-encodings (`%3A %2F %3F %40 %21 %24 %27 %28 %29 %2A %2C %3B`) and leaves query-string delimiters encoded. GTMOS calls `urllib.parse.unquote(uri)`, which decodes everything, including `%26` and `%3D`. For the plain webhook URL the two agree; a subscription URL with percent-encoded query parameters would fail verification.
 
-**Deduplication.** `idempotency_key_for` prefers an `Idempotency-Key` / `X-Idempotency-Key` header, then a payload `uuid` / `event_id` / `eventId` / `id`, then `"{source}:sha256:{hex}"` of the raw body, truncated to 200 chars; `UNIQUE (source, idempotency_key)` enforces it under concurrency. HubSpot delivers a JSON **array**, which takes the body-hash branch — see §6b.
+**Deduplication.** `idempotency_key_for` prefers an `Idempotency-Key` / `X-Idempotency-Key` header, then a payload `uuid` / `event_id` / `eventId` / `id`, then — for HubSpot's JSON **array** — the sorted set of member event ids (`"hubspot:batch:{ids}"`, collapsing to a hash of those ids when a large batch would overflow the column). Only a payload with no usable id anywhere falls back to a hash, and that hash is taken over a canonical form with the retry counters (`attemptNumber` and friends) stripped, so a redelivery hashes identically. Keys are truncated to 200 chars and `UNIQUE (source, idempotency_key)` enforces them under concurrency.
 
 **Why inbound changes are logged and not applied.** The processor registered in `api/routes/integrations.py` is deliberately inert:
 
@@ -215,7 +215,7 @@ A stronger implementation would populate `remote_updated_at` from `hs_lastmodifi
 HubSpot retries a delivery up to 10 times over 24 hours on a timeout (the 5-second response budget), a connection failure, or any 4xx/5xx. What happens today, in order:
 
 1. `verify_request` runs first; a delivery that fails the signature cannot create a "seen" record (see below).
-2. `idempotency_key_for` derives the key. For a single JSON object carrying `eventId` it is `"hubspot:{eventId}"` and dedupe works as intended; for HubSpot's real **array** payload the dict branch is skipped and the key is `"hubspot:sha256:{hash of the whole body}"`.
+2. `idempotency_key_for` derives the key. For a single JSON object carrying `eventId` it is `"hubspot:{eventId}"`; for HubSpot's real **array** payload it is `"hubspot:batch:{sorted event ids}"`. The ids are sorted because HubSpot does not guarantee ordering across redeliveries of a batch, and `attemptNumber` never reaches the key, so attempt 0 and attempt 9 of the same batch collide as they must.
 3. On a match whose stored status is neither `rejected` nor `failed`, `receive` increments `duplicate_count` and returns `ReceiveResult(existing, duplicate=True, 200)` — the processor does not run again and the caller gets the original `result`.
 4. On a match whose status is `failed`, and where the new delivery is not invalid, GTMOS does **not** ack a failure as a duplicate: it increments `attempts` and `duplicate_count` and reprocesses. This was a bug caught in review — a webhook that failed processing was acked as a duplicate on retry, so a genuine retry could never succeed.
 5. `_process` runs the processor in `db.begin_nested()`, so a failure rolls back its partial writes without losing the `webhook_events` row. The status becomes `dead_letter` at `attempts >= MAX_ATTEMPTS` (3) and `failed` otherwise; both return `202`, which keeps HubSpot retrying while the event is still retryable. Replay via `POST /webhooks/events/{id}/replay` is available for failed and dead-lettered events, but not for `source="hubspot"`.
@@ -236,9 +236,11 @@ if existing is not None:
 
 A rejected row is re-evaluated **in place** — same row, same unique key, fresh verification result — so the unique constraint still holds and a later valid delivery is processed normally.
 
-> **Gap found while writing this.** HubSpot's array payload hashes the whole body, and each event object carries an `attemptNumber` that increments on retry, so a redelivery produces a **different body and therefore a different key**: it is stored as a new event and processed again. Harmless with today's no-op processor. Before any inbound handler does real work, `idempotency_key_for` must handle list payloads — dedupe per event on `eventId` (with `subscriptionId`/`portalId`), fanning one delivery into one row per event.
+> **Two bugs this write-up found, both since fixed.** HubSpot's array payload used to take the body-hash branch, and each event object carries an `attemptNumber` that increments on retry — so a redelivery produced a different body, a different key, a new row and a second execution of the processor. The endpoint deduplicated nothing at all. The batch-key and stripped-hash rules above are the fix, pinned by `tests/integration/test_webhook_dedupe.py`.
 >
-> Smaller inconsistency: if an existing row is `failed` and a delivery arrives with an **invalid** signature, step 4's condition excludes it and it falls into step 3's duplicate branch, returning `200` instead of `401`. It cannot cause processing, but an unauthenticated caller learns the key exists.
+> The second: a delivery with an **invalid** signature that matched an existing key fell through to the duplicate branch and returned `200`, telling an unauthenticated caller that the key existed. An invalid signature is now rejected with `401` before any branch that touches stored state, and — deliberately — without mutating the stored event, so a forged delivery cannot change the status of an event that was legitimately processed or inflate its duplicate counter.
+>
+> **Still open:** one delivery is still stored as one row rather than fanned out into one row per event. That is the right shape once an inbound handler does real work per event; today's handler is a no-op that only logs.
 
 ### 6c. The warehouse and the CRM disagree
 

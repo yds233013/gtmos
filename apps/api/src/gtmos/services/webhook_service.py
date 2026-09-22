@@ -56,14 +56,61 @@ def verify_request(
     return VerifyResult("valid" if ok else "invalid", why)
 
 
+EVENT_ID_KEYS = ("uuid", "event_id", "eventId", "id")
+# Fields a sender changes between retries of the *same* event. They must not reach the body hash, or a
+# redelivery would look like a new event. HubSpot increments `attemptNumber` on every retry.
+RETRY_VOLATILE_KEYS = frozenset({"attemptNumber", "attempt_number", "attempt", "retryCount", "deliveryId"})
+
+
+def _event_id(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    for key in EVENT_ID_KEYS:
+        # `is not None` rather than truthiness: HubSpot event ids are integers and 0 is a valid one.
+        value = item.get(key)
+        if value is not None and str(value) != "":
+            return str(value)
+    return None
+
+
+def _stable_body(payload: Any) -> bytes:
+    """Canonical JSON with per-retry fields stripped, so the hash identifies the event, not the attempt."""
+
+    def strip(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if k not in RETRY_VOLATILE_KEYS}
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    return json.dumps(strip(payload), sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
 def idempotency_key_for(source: str, payload: Any, headers: dict[str, str], body: bytes) -> str:
+    """A key that is identical across redeliveries of the same event and distinct across different ones.
+
+    HubSpot posts a JSON *array* of events and bumps `attemptNumber` on each retry, so keying on the raw
+    body would make every retry look new and defeat deduplication entirely. Batches are keyed by their
+    member event ids; only a payload with no usable id at all falls back to a hash, and that hash is
+    taken over a canonical form with the retry counters removed.
+    """
     h = {k.lower(): v for k, v in headers.items()}
     if explicit := h.get("idempotency-key") or h.get("x-idempotency-key"):
         return explicit[:200]
-    if isinstance(payload, dict):
-        for key in ("uuid", "event_id", "eventId", "id"):
-            if payload.get(key):
-                return f"{source}:{payload[key]}"[:200]
+    if (single := _event_id(payload)) is not None:
+        return f"{source}:{single}"[:200]
+    if isinstance(payload, list) and payload:
+        ids = [_event_id(item) for item in payload]
+        if all(i is not None for i in ids):
+            # Order is not guaranteed across redeliveries of a batch, so sort before joining. Long
+            # batches collapse to a hash of their ids to stay inside the column width.
+            joined = ",".join(sorted(str(i) for i in ids))
+            digest = f"{source}:batch:{joined}"
+            if len(digest) > 200:
+                digest = f"{source}:batch:sha256:{hashlib.sha256(joined.encode()).hexdigest()}"
+            return digest
+    if payload is not None:
+        return f"{source}:sha256:{hashlib.sha256(_stable_body(payload)).hexdigest()}"
     return f"{source}:sha256:{hashlib.sha256(body).hexdigest()}"
 
 
@@ -105,6 +152,12 @@ def receive(
         existing.duplicate_count += 1
         _process(db, existing, payload, processor)
         return ReceiveResult(existing, False, 200 if existing.status == "processed" else 202)
+    if existing is not None and verification.status == "invalid":
+        # An unsigned or badly signed delivery is rejected whatever we have seen before. Without this,
+        # knowing (or guessing) an event id would be enough to get a 200 out of the endpoint and to
+        # inflate another event's duplicate counter. The stored event is left untouched: a forged
+        # delivery must not be able to change the status of an event that was legitimately processed.
+        return ReceiveResult(existing, False, 401)
     if existing is not None and existing.status != "rejected":
         existing.duplicate_count += 1
         db.flush()

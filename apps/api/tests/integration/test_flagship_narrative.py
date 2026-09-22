@@ -134,9 +134,7 @@ def test_routing_crm_and_next_action_agree(client, db, flagship):
 
 
 def test_experiment_assignment_and_outcomes_close_the_loop(db, flagship):
-    assignment = db.scalars(
-        select(ExperimentAssignment).where(ExperimentAssignment.account_id == flagship.id)
-    ).first()
+    assignment = db.scalars(select(ExperimentAssignment).where(ExperimentAssignment.account_id == flagship.id)).first()
     assert assignment is not None, "the flagship must participate in an experiment"
     metrics = {
         o.metric for o in db.scalars(select(ExperimentOutcome).where(ExperimentOutcome.assignment_id == assignment.id))
