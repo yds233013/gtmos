@@ -2883,8 +2883,14 @@ def seed(
         len(c.activity_rows),
     )
 
-    # Scores, committees, routing (real engines on the synthetic data)
-    now = datetime.now(UTC)
+    # Scores, committees, routing (real engines on the synthetic data).
+    #
+    # Scored at the anchor, not at wall-clock time. Every signal is placed at an offset from the
+    # anchor, so scoring at "now" measured decay over an interval that depended on how long the seed
+    # had been running — two resets on the same afternoon produced different grade distributions as
+    # borderline accounts tipped across a band. Anchoring makes the dataset a pure function of the
+    # anchor, which is what "deterministic demo data" has to mean.
+    now = c.anchor
     rescore_accounts(db, ws.id, trigger="seed", now=now, write_audit=False)
     live_accounts = list(c.accounts)
     recompute_committees_bulk(db, live_accounts)
@@ -2950,10 +2956,7 @@ def seed(
         # find: the clock started and ran out. Rare on purpose — common enough to show, not so common
         # that the metric reads as "this team works nothing".
         dropped = (
-            touch_at is None
-            and last_sig is not None
-            and last_sig >= now - timedelta(days=45)
-            and c.rng.random() < 0.3
+            touch_at is None and last_sig is not None and last_sig >= now - timedelta(days=45) and c.rng.random() < 0.3
         )
         if dropped and last_sig is not None:
             decided = last_sig + timedelta(hours=c.rng.uniform(0.5, 8))
