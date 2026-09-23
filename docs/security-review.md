@@ -4,7 +4,7 @@ Phase 3 added three inbound paths (Clay, an expanded PostHog path, HubSpot webho
 one new outbound client. Each one is a place where data GTMOS did not author enters a system that
 writes to a CRM and generates text a human will send to a stranger. This is the review of that surface.
 
-The headline: **one genuinely exploitable vulnerability was found and fixed**, and it was introduced by
+The headline: **one genuinely exploitable vulnerability was found and fixed**, and two authorisation gaps were found that an earlier draft of this document had scoped away, and it was introduced by
 Phase 3's own integration work.
 
 ---
@@ -61,7 +61,39 @@ The v3 verifier ran `unquote()` over the request URI before hashing. HubSpot sig
 so any request carrying a percent-encoded character in path or query would have failed. Now signed
 exactly as received, with a test that signs the decoded form and asserts it does *not* verify.
 
-## Finding 4 — No inbound rate limiting · **Medium** · Open, documented
+## Finding 4 — the admin gate is off in the mode everyone runs · **Medium** · Open, documented
+
+`require_admin` genuinely gates four endpoints: `PUT /icp` and the three governance ones. The
+reverse-ETL endpoints use `require_admin_for_live_writes` instead (`api/deps.py:58`), which calls
+`require_admin` **only when a HubSpot token exists and live writes are enabled**. In the shipped demo
+configuration neither is true, so the gate is a no-op — and so is every other mutating endpoint that
+has no gate at all. Anyone who can reach the API can trigger an 850-account sync, merge contacts
+through `POST /data-quality/issues/{id}/remediate`, approve a draft, rescore an account or replay a
+webhook, unauthenticated.
+
+The design intent is defensible: the demo is meant to be openable, nothing it mutates leaves the
+machine, and the outbound kill switch means an approval cannot become a send. What was **not**
+defensible was the earlier wording of this document, which described the system as having
+"admin-token gating on destructive endpoints" and then scoped authorisation out — declaring the area
+out of scope while describing it as covered. That is the one move in this review that did work the
+facts did not support, and it is corrected here rather than quietly dropped.
+
+What production needs: session-derived identity, RBAC, and `require_admin` (not the live-writes
+variant) on every mutating route. What this repository needs right now is to say so.
+
+## Finding 5 — the audit actor is caller-asserted · **Medium** · Open, documented
+
+`actor()` (`api/deps.py:37`) accepts any `X-GTMOS-Actor` header that is under 200 characters and
+contains an `@`, and writes it into the audit log. Every mutation really is audited with a before,
+an after, a reason and a correlation id — but the *who* is whatever the caller claimed. An audit
+trail is attributable only to an honest caller, which is to say it is a change log, not an audit log.
+
+This is the correct shape for a single-operator demo and the wrong shape for anything with two users.
+The fix is not larger than the problem — derive the actor from the session once there is one — but
+until then the guarantee is weaker than "audited" suggests, and the surfaces that say "audited"
+should be read with that in mind.
+
+## Finding 6 — No inbound rate limiting · **Medium** · Open, documented
 
 Webhook endpoints have a 1 MB payload cap and signature verification, but **no request-rate limit**. A
 party who obtains a valid signing secret, or hits an endpoint where the secret is unconfigured in
@@ -71,7 +103,7 @@ Not fixed because the right answer depends on deployment: in production this bel
 API gateway or reverse proxy), not in application code, and adding a naive in-process limiter would
 give false confidence in a multi-process deployment. Recorded here rather than quietly omitted.
 
-## Finding 5 — Development secrets in `.env` · **Low** · Accepted
+## Finding 7 — Development secrets in `.env` · **Low** · Accepted
 
 `WEBHOOK_SECRET` and `ADMIN_API_TOKEN` are generated locally and stored in `.env`, which is git-ignored
 and verified so. They authenticate nothing outside this machine. They exist so signature verification
@@ -104,17 +136,20 @@ variables turned three passing tests red, which is how the coupling was found.
 
 Stated plainly, because a review that concludes "no issues" is not a review:
 
-1. **Flood an unprotected webhook endpoint** (Finding 4).
-2. **Poison enrichment upstream in ways sanitisation does not catch.** The sanitiser removes sentences
+1. **Flood an unprotected webhook endpoint** (Finding 6).
+2. **Call any mutating endpoint without a credential** in the demo configuration (Finding 4), and **write any actor name they like into the audit log while doing it** (Finding 5).
+3. **Poison enrichment upstream in ways sanitisation does not catch.** The sanitiser removes sentences
    that look like instructions. A subtler payload — a plausible but false funding figure — passes
    cleanly, because it is indistinguishable from a wrong data vendor. The real defence is the
    provider-conflict machinery and the fact that a human approves every message, not the regex.
-3. **Replay a v1-signed HubSpot delivery** within the dedupe window's blind spots, if they obtained the
+4. **Replay a v1-signed HubSpot delivery** within the dedupe window's blind spots, if they obtained the
    client secret. Mitigated by event-id dedupe, not by the signature.
-4. **Exploit a dependency.** No supply-chain scanning runs in this project.
+5. **Exploit a dependency.** No supply-chain scanning runs in this project.
 
 ## Not in scope
 
-No authentication or multi-tenant authorisation review, because V1 deliberately runs as a single
-operator identity with admin-token gating on destructive endpoints; production needs SSO/OIDC and RBAC,
-and that is recorded in the README's production considerations rather than pretended away.
+No **multi-tenant** authorisation model, because V1 deliberately runs as a single operator identity.
+Single-operator authorisation is *not* scoped out — Findings 4 and 5 are exactly that surface, and an
+earlier version of this section used "not in scope" to cover for them. Production needs SSO/OIDC and
+RBAC, which is recorded in the README's production considerations; what is recorded here is that the
+current gate does not do what this document previously claimed it did.

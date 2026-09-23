@@ -179,7 +179,7 @@ flowchart LR
   prose from a supplied evidence pack, and its output is validated like any other generator's.
 - **Postgres is the source of truth; Redis is delivery.** Workflow runs are rows first. They're enqueued
   *after commit*, and a sweeper re-enqueues anything stuck in `queued`.
-- **Every mutation is audited** with actor, before/after, reason and correlation id.
+- **Every mutation is audited** with actor, before/after, reason and correlation id. The actor is caller-asserted in V1 rather than session-derived, which makes this a change log with a name on it rather than a true audit trail — recorded as Finding 5 in [`docs/security-review.md`](docs/security-review.md).
 
 Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`](docs/data-model.md) ·
 [`docs/integrations.md`](docs/integrations.md) · [`docs/warehouse.md`](docs/warehouse.md) ·
