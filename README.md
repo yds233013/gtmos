@@ -378,7 +378,8 @@ docs/           Research, spec, architecture, data model, concepts, integrations
 HubSpot, Clay, n8n and PostHog through this repository.
 
 **Architecture and integrations**
-[Phase 3 architecture](docs/phase3-architecture.md) · [Architecture](docs/architecture.md) ·
+[Phase 3 architecture](docs/phase3-architecture.md) · [Tool research](docs/phase3-tool-research.md) ·
+[Architecture](docs/architecture.md) ·
 [Data model](docs/data-model.md) · [Integrations](docs/integrations.md) ·
 [CRM sync design](docs/crm-sync-design.md) · [Warehouse layer](docs/warehouse.md) ·
 [n8n](docs/n8n.md)
@@ -390,7 +391,8 @@ HubSpot, Clay, n8n and PostHog through this repository.
 **Evaluation and honesty**
 [Scoring evaluation](docs/scoring-evaluation.md) · [Scoring backtest](docs/scoring-backtest.md) ·
 [Matcher evaluation](docs/matcher-evaluation.md) · [Content evaluation](docs/llm-evaluation.md) ·
-[Failure tournament](docs/failure-tournament.md) · [Security review](docs/security-review.md)
+[Failure tournament](docs/failure-tournament.md) · [Security review](docs/security-review.md) ·
+[Product review](docs/phase3-product-review.md)
 
 **Reference and interview prep**
 [Market research](docs/market-research.md) · [Product spec](docs/product-spec.md) ·
