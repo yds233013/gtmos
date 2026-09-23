@@ -14,7 +14,6 @@ import {
   VerdictBadge,
   verdictMeta,
 } from "@/components/insights/experiment-ui";
-import type { Comparison, ExperimentDetail, Variant } from "@/components/insights/types";
 import { Badge, DemoBadge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -25,12 +24,16 @@ import { api, ApiError } from "@/lib/api";
 import { date, money, num, pct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
+import { actionMeta, CeilingBar, GuardrailBadge } from "../guardrail-ui";
+import type { GuardedComparison, GuardedExperiment, GuardedVariant, GuardrailCheck } from "../types";
+
 const METRIC_ORDER = ["reply", "positive_reply", "meeting", "opportunity"];
+const GUARDRAIL_ORDER = ["bounce", "unsubscribe", "spam_complaint", "negative_reply"];
 
 /** Deduped per request so generateMetadata and the page share one API call. */
-const fetchExperiment = cache((key: string) => api<ExperimentDetail>(`/experiments/${encodeURIComponent(key)}`));
+const fetchExperiment = cache((key: string) => api<GuardedExperiment>(`/experiments/${encodeURIComponent(key)}`));
 
-async function load(key: string): Promise<{ exp: ExperimentDetail | null; error: string | null }> {
+async function load(key: string): Promise<{ exp: GuardedExperiment | null; error: string | null }> {
   try {
     return { exp: await fetchExperiment(key), error: null };
   } catch (e) {
@@ -49,15 +52,66 @@ export async function generateMetadata(props: PageProps<"/experiments/[key]">) {
   }
 }
 
+function GuardrailTable({ checks }: { checks: GuardrailCheck[] }) {
+  return (
+    <Table>
+      <THead>
+        <tr>
+          <Th>Guardrail</Th>
+          <Th align="right">Control</Th>
+          <Th align="right">Treatment</Th>
+          <Th align="right">Ceiling</Th>
+          <Th className="min-w-28">Treatment vs ceiling</Th>
+          <Th>Status</Th>
+        </tr>
+      </THead>
+      <tbody>
+        {checks.map((g) => (
+          <Tr key={g.metric} className={cn(g.status === "breach" && "bg-danger-soft/40")}>
+            <Td className="align-top">
+              <div className="font-medium whitespace-nowrap">{g.label}</div>
+              <p className="mt-0.5 max-w-80 text-[11px] leading-snug text-muted">{g.rationale}</p>
+            </Td>
+            <Td align="right" className="align-top tabular whitespace-nowrap">
+              {pct(g.control.rate, 2)}
+              <div className="text-[11px] text-muted">
+                {num(g.control.successes)} / {num(g.control.n)}
+              </div>
+            </Td>
+            <Td align="right" className="align-top tabular whitespace-nowrap">
+              <span className={cn(g.status === "breach" && "font-semibold text-danger")}>{pct(g.treatment.rate, 2)}</span>
+              <div className="text-[11px] text-muted">
+                {num(g.treatment.successes)} / {num(g.treatment.n)}
+              </div>
+            </Td>
+            <Td align="right" className="align-top tabular whitespace-nowrap text-muted">
+              {pct(g.ceiling, 2)}
+            </Td>
+            <Td className="align-top">
+              <div className="py-1">
+                <CeilingBar check={g} />
+              </div>
+            </Td>
+            <Td className="max-w-72 align-top">
+              <GuardrailBadge status={g.status} />
+              <p className="mt-1 text-[11px] leading-snug text-muted">{g.reason}</p>
+            </Td>
+          </Tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
 function ComparisonTable({
   control,
   treatment,
   comps,
   primary,
 }: {
-  control: Variant;
-  treatment: Variant;
-  comps: Record<string, Comparison>;
+  control: GuardedVariant;
+  treatment: GuardedVariant;
+  comps: Record<string, GuardedComparison>;
   primary: string;
 }) {
   const metrics = [...METRIC_ORDER.filter((m) => comps[m] || control.metrics[m]), ...Object.keys(comps).filter((m) => !METRIC_ORDER.includes(m))];
@@ -97,7 +151,14 @@ function ComparisonTable({
                   <span className="font-medium">{metricLabel(m)}</span>
                   {isPrimary && <Badge tone="accent">Primary</Badge>}
                 </div>
-                {cmp?.required_n_per_variant ? (
+                {cmp?.mde_abs != null ? (
+                  <div
+                    className="mt-0.5 text-[11px] text-muted"
+                    title="Minimum detectable effect: the smallest lift this sample size would catch 80% of the time at 95% confidence"
+                  >
+                    MDE {pp(cmp.mde_abs)} · acts above {pp(cmp.practical_threshold)}
+                  </div>
+                ) : cmp?.required_n_per_variant ? (
                   <div className="mt-0.5 text-[11px] text-muted" title="Per-variant sample needed to detect the observed lift at 95% confidence and 80% power">
                     Needs ~{num(cmp.required_n_per_variant)} / variant to detect this lift
                   </div>
@@ -146,6 +207,7 @@ function ComparisonTable({
                   <>
                     <VerdictBadge verdict={cmp.verdict} />
                     <p className="mt-1 text-[11px] leading-snug text-muted">{cmp.explanation}</p>
+                    {isPrimary && <p className="mt-1 text-[11px] leading-snug text-muted">{cmp.practical_note}</p>}
                   </>
                 ) : (
                   "—"
@@ -175,9 +237,12 @@ export default async function ExperimentPage(props: PageProps<"/experiments/[key
   const control = exp.variants.find((v) => v.is_control) ?? exp.variants[0];
   const treatments = exp.variants.filter((v) => v !== control);
   const verdict = verdictMeta(exp.verdict);
-  const VerdictIcon = verdict.icon;
   const insufficient = exp.verdict === "insufficient_sample" || exp.verdict === "insufficient_events";
   const smallest = Math.min(...exp.variants.map((v) => v.units));
+  const rec = exp.recommendation;
+  const action = actionMeta(rec?.action);
+  const ActionIcon = action.icon;
+  const primaryCmp = exp.comparisons[treatments[0]?.key ?? ""]?.[exp.primary_metric];
 
   return (
     <div className="space-y-6">
@@ -202,17 +267,28 @@ export default async function ExperimentPage(props: PageProps<"/experiments/[key
         />
       </div>
 
-      <section className={cn("rounded-lg border p-4", verdict.box)} aria-labelledby="verdict-heading">
+      <section className={cn("rounded-lg border p-4", action.box)} aria-labelledby="verdict-heading">
         <div className="flex items-start gap-3">
-          <VerdictIcon className={cn("mt-0.5 size-5 shrink-0", verdict.ink)} aria-hidden />
+          <ActionIcon className={cn("mt-0.5 size-5 shrink-0", action.ink)} aria-hidden />
           <div className="min-w-0 flex-1">
-            <h2 id="verdict-heading" className={cn("text-base font-semibold", verdict.ink)}>
-              {verdict.label}
-              <span className="ml-2 text-xs font-normal text-muted">on {metricLabel(exp.primary_metric).toLowerCase()}</span>
+            <h2 id="verdict-heading" className={cn("text-base font-semibold", action.ink)}>
+              {rec?.headline ?? verdict.label}
             </h2>
-            <p className="mt-1 text-sm text-text">{exp.verdict_explanation}</p>
-            {insufficient && (
-              <p className="mt-1 text-xs text-muted">
+            <p className="mt-1 text-sm text-text">{rec?.reasoning ?? exp.verdict_explanation}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+              <span className="inline-flex items-center gap-1">
+                Statistical verdict on {metricLabel(exp.primary_metric).toLowerCase()}: <VerdictBadge verdict={exp.verdict} />
+              </span>
+              {primaryCmp?.mde_abs != null && <span>Detectable at this sample: {pp(primaryCmp.mde_abs)} or more</span>}
+              {primaryCmp && <span>Acts above {pp(primaryCmp.practical_threshold)}</span>}
+              {rec?.blocking_guardrails.map((m) => (
+                <Badge key={m} tone="danger">
+                  {metricLabel(m)} breached
+                </Badge>
+              ))}
+            </div>
+            {insufficient && !rec?.blocking_guardrails.length && (
+              <p className="mt-2 text-xs text-muted">
                 Keep the test running. Observed differences at this sample size are mostly noise, so the dashboard declares no winner.
               </p>
             )}
@@ -297,6 +373,28 @@ export default async function ExperimentPage(props: PageProps<"/experiments/[key
         </Panel>
       ))}
 
+      {treatments.map((t) => {
+        const checks = GUARDRAIL_ORDER.map((m) => exp.guardrails[t.key]?.[m]).filter((g): g is GuardrailCheck => Boolean(g));
+        if (!checks.length) return null;
+        const breached = checks.filter((g) => g.status === "breach").length;
+        return (
+          <Panel
+            key={`guardrails-${t.key}`}
+            title={`Guardrails · ${t.name}`}
+            description="Checked for harm, not for lift. A guardrail past its ceiling blocks the ship decision whatever the primary metric did."
+            bodyClassName="p-0"
+            actions={breached ? <Badge tone="danger">{breached} breached</Badge> : <Badge tone="success">All within limits</Badge>}
+          >
+            <GuardrailTable checks={checks} />
+            <p className="border-t border-border px-4 py-3 text-[11px] leading-snug text-muted">
+              This is why reply rate alone is a bad objective. A subject line that implies a problem the reader has to open the email to
+              resolve reliably earns replies — and unsubscribes, spam complaints and &ldquo;take us off your list&rdquo; from everyone it
+              annoyed. The reply lands this quarter; the burnt domain lands next one, on someone else&rsquo;s campaign.
+            </p>
+          </Panel>
+        );
+      })}
+
       <Panel title="How to read this">
         <div className="flex items-start gap-3 text-xs">
           <Info className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
@@ -315,6 +413,24 @@ export default async function ExperimentPage(props: PageProps<"/experiments/[key
             <li>
               <span className="font-medium">Only the primary metric decides the verdict.</span> Secondary metrics are descriptive; testing
               several at once without correction would inflate false positives.
+            </li>
+            <li>
+              <span className="font-medium">Guardrails are limits, not metrics.</span> They are never traded off against the primary metric
+              and never counted as a win when they improve. Each one is checked one-sided against a ceiling set before launch, and a
+              confirmed breach turns the recommendation to &ldquo;do not ship&rdquo; even when the treatment won.
+            </li>
+            <li>
+              <span className="font-medium">MDE</span> is the smallest lift this sample size would have caught 80% of the time. When a test
+              comes back null, compare it to the MDE: a null with a 10 pp MDE means the test was blind, not that nothing happened.
+            </li>
+            <li>
+              <span className="font-medium">Significant is not the same as worth shipping.</span> Below the practical threshold shown on the
+              primary row, the lift costs more in rewriting sequences and retraining reps than it returns, so the call is &ldquo;no
+              change&rdquo; even at p &lt; 0.05.
+            </li>
+            <li>
+              <span className="font-medium">What randomisation buys.</span> A causal read of the gap between these two arms, on this
+              audience, in this window. Not a claim about other segments, other quarters or other channels.
             </li>
             <li>
               <span className="font-medium">Why no winner below the minimum sample?</span> Peeking at small samples and stopping when a

@@ -32,6 +32,7 @@ from gtmos.domain.pipeline import check_funnel_transition
 from gtmos.domain.rules import evaluate_all
 from gtmos.domain.workflows import WorkflowDefinition, backoff_seconds, idempotency_key
 from gtmos.models import Account, Activity, MessageDraft, Workflow, WorkflowRun, WorkflowStepRun
+from gtmos.services import governance
 from gtmos.services.common import audit, correlation_id, utcnow
 
 log = logging.getLogger(__name__)
@@ -250,6 +251,11 @@ def emit_event(
     execute: bool = True,
     data_origin: str = "live",
 ) -> list[WorkflowRun]:
+    # The kill switch is checked before any run row is created, so a pause leaves no queue to drain
+    # when automation is resumed. `execute_run` checks it again for runs already in flight.
+    if not governance.is_enabled(db, workspace_id, "automation_enabled"):
+        log.info("automation is paused for workspace %s; not emitting %s", workspace_id, trigger_type)
+        return []
     workflows = list(
         db.scalars(
             select(Workflow).where(
@@ -417,6 +423,11 @@ def execute_run(db: Session, run_id: uuid.UUID, *, sleep: Callable[[float], None
         log.info("workflow run %s is already being executed elsewhere; skipping", run_id)
         return unclaimed
     if run.status in ("succeeded", "skipped"):
+        return run
+    if not governance.is_enabled(db, run.workspace_id, "automation_enabled"):
+        # A run that was already queued when automation was paused. Left queued rather than failed:
+        # pausing is not the same as cancelling, and resuming should pick up where it stopped.
+        log.info("automation is paused; leaving run %s queued", run_id)
         return run
     wf = db.get(Workflow, run.workflow_id)
     account = db.get(Account, run.account_id) if run.account_id else None

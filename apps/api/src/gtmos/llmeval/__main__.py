@@ -25,8 +25,7 @@ def render(report: dict[str, Any]) -> str:
     lines = [
         "# Generated-content evaluation",
         "",
-        f"Writer under test: **{report['writer']}**. "
-        f"{report['passed']} of {report['cases']} cases passed.",
+        f"Writer under test: **{report['writer']}**. {report['passed']} of {report['cases']} cases passed.",
         "",
         "| Case | Result | Claims | What it checks |",
         "| --- | :---: | ---: | --- |",

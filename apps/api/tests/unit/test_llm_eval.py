@@ -64,7 +64,7 @@ def test_an_invented_number_is_caught():
 
 
 def test_the_same_number_written_two_ways_is_not_a_false_positive():
-    """"$140M" and "140,000,000" are one number; a grader that disagrees gets ignored."""
+    """ "$140M" and "140,000,000" are one number; a grader that disagrees gets ignored."""
     out = broken(text="Kestrel has raised $140M to date.")(GOOD.inp)
     assert check_numbers_grounded(out).passed
 

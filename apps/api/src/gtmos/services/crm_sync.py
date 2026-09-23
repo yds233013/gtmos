@@ -31,6 +31,7 @@ from gtmos.integrations.hubspot import (
     company_properties,
 )
 from gtmos.models import Account, ExternalRecord, Integration, IntegrationSync, Signal
+from gtmos.services import governance
 from gtmos.services.common import audit, correlation_id, jsonable, utcnow
 from gtmos.services.next_action import next_best_action, next_best_actions
 
@@ -150,6 +151,9 @@ def run_company_sync(
     adapter: CrmAdapter | None = None,
     sleep: Any = None,
 ) -> IntegrationSync:
+    # Checked before the adapter is built, so a paused workspace never opens a connection, and the
+    # caller gets an operator-readable reason rather than a mysteriously empty sync.
+    governance.require(db, workspace_id, "crm_writes_enabled")
     adapter = adapter or get_adapter(db, workspace_id)
     started = utcnow()
     t0 = time.perf_counter()

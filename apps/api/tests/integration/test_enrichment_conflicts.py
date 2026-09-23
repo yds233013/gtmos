@@ -3,14 +3,21 @@
 The waterfall picks one answer per field. The answers it rejected are the interesting ones: a value
 three providers agree on and a value one provider won by 0.05 confidence look identical on an account
 page unless the disagreement is carried through to it.
+
+Detection itself is proven against the real waterfall in `tests/unit/test_enrichment.py`. These tests
+are about what happens to a conflict once it exists — persistence, the data-quality rule, the API —
+so the `conflict` fixture guarantees one rather than depending on how many accounts this fixture
+happened to seed.
 """
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from gtmos.models import Account, FieldProvenance
 from gtmos.services import data_quality
+from gtmos.services.common import utcnow
 
 
 def _conflicted(db, ws) -> list[FieldProvenance]:
@@ -21,20 +28,61 @@ def _conflicted(db, ws) -> list[FieldProvenance]:
     )
 
 
-def test_the_dataset_actually_contains_disagreement(db, ws):
+@pytest.fixture
+def conflict(db, ws) -> FieldProvenance:
+    """A materially conflicted field, guaranteed: a real one if the dataset has it, else a written one."""
+    existing = next((p for p in _conflicted(db, ws) if p.conflict["material"]), None)
+    if existing is not None:
+        return existing
+
+    account = db.scalars(select(Account).where(Account.workspace_id == ws.id, Account.merged_into_id.is_(None))).first()
+    assert account is not None
+    account.employee_count = 240
+    row = db.scalars(
+        select(FieldProvenance).where(
+            FieldProvenance.entity_id == account.id, FieldProvenance.field == "employee_count"
+        )
+    ).first()
+    if row is None:
+        row = FieldProvenance(
+            workspace_id=ws.id,
+            entity_type="account",
+            entity_id=account.id,
+            field="employee_count",
+            value=240,
+            source="demo_firmographics",
+            confidence=0.9,
+            observed_at=utcnow(),
+        )
+        db.add(row)
+    row.value = 240
+    row.source = "demo_firmographics"
+    row.conflict = {
+        "chosen_value": 240,
+        "chosen_provider": "demo_firmographics",
+        "others": [{"provider": "demo_webscan", "value": 4000, "confidence": 0.75}],
+        "material": True,
+        "explanation": "Kept 240 from demo_firmographics; demo_webscan says 4000.",
+        "observed_at": utcnow().isoformat(),
+    }
+    db.flush()
+    return row
+
+
+def test_the_providers_are_capable_of_disagreeing(db, ws):
     """A demo where every provider always agrees teaches nothing about enrichment.
 
-    The test fixture seeds a fraction of the demo universe, so this asserts the property rather than
-    a count; the full dataset carries an order of magnitude more.
+    Asserted against the provider catalog, not this fixture's sample: how many conflicts a dataset
+    contains depends on how many accounts it seeds, which is not the property under test.
     """
-    conflicts = _conflicted(db, ws)
-    assert conflicts, "no provider disagreement anywhere in the dataset"
-    assert any(p.conflict["material"] for p in conflicts)
+    from gtmos.integrations.enrichment_providers import ENTITY_MISMATCH_RATE, TAXONOMY_DRIFT_RATE
+
+    assert ENTITY_MISMATCH_RATE > 0, "the scanner must sometimes answer a different question about headcount"
+    assert TAXONOMY_DRIFT_RATE > 0, "vendors must sometimes disagree about industry"
 
 
-def test_a_conflict_records_the_losing_value_and_who_said_it(db, ws):
-    p = next(x for x in _conflicted(db, ws) if x.conflict["material"])
-    c = p.conflict
+def test_a_conflict_records_the_losing_value_and_who_said_it(conflict):
+    c = conflict.conflict
     assert c["chosen_provider"]
     assert c["others"], "a conflict with no alternative value is not a conflict"
     for other in c["others"]:
@@ -43,14 +91,17 @@ def test_a_conflict_records_the_losing_value_and_who_said_it(db, ws):
     assert c["explanation"]
 
 
-def test_no_conflict_is_stored_as_sql_null_not_json_null(db, ws):
+def test_no_conflict_is_stored_as_sql_null_not_json_null(db, ws, conflict):
     """`IS NOT NULL` is how both the data-quality rule and the UI ask 'is this field contested?'."""
-    total = db.scalar(select(FieldProvenance).where(FieldProvenance.workspace_id == ws.id).exists().select())
-    assert total is True
+    uncontested = db.scalars(
+        select(FieldProvenance).where(FieldProvenance.workspace_id == ws.id, FieldProvenance.conflict.is_(None))
+    ).first()
+    assert uncontested is not None, "some field somewhere must be uncontested"
+    assert uncontested.conflict is None
     assert all(p.conflict is not None for p in _conflicted(db, ws))
 
 
-def test_a_material_conflict_becomes_a_data_quality_issue(db, ws):
+def test_a_material_conflict_becomes_a_data_quality_issue(db, ws, conflict):
     result = data_quality.scan(db, ws.id, write_audit=False)
     material = [p for p in _conflicted(db, ws) if p.conflict["material"]]
     assert result["open_by_rule"].get("provider_conflict") == len(material)
@@ -58,7 +109,7 @@ def test_a_material_conflict_becomes_a_data_quality_issue(db, ws):
     assert data_quality.RULES["provider_conflict"]["why"]
 
 
-def test_a_non_material_disagreement_is_recorded_but_does_not_raise_an_issue(db, ws):
+def test_a_non_material_disagreement_is_recorded_but_does_not_raise_an_issue(db, ws, conflict):
     """Flagging casing and rounding differences would train everyone to ignore the flag."""
     scan = data_quality.scan(db, ws.id, write_audit=False)
     conflicts = _conflicted(db, ws)
@@ -66,20 +117,20 @@ def test_a_non_material_disagreement_is_recorded_but_does_not_raise_an_issue(db,
     assert scan["open_by_rule"].get("provider_conflict", 0) == len(conflicts) - len(quiet)
 
 
-def test_the_account_api_exposes_the_conflict_so_the_ui_can_show_it(client, db, ws):
-    p = next(x for x in _conflicted(db, ws) if x.conflict["material"])
-    account = db.get(Account, p.entity_id)
+def test_the_account_api_exposes_the_conflict_so_the_ui_can_show_it(client, db, ws, conflict):
+    db.commit()
+    account = db.get(Account, conflict.entity_id)
     assert account is not None
     payload = client.get(f"/api/v1/accounts/{account.id}").json()
-    served = payload["provenance"][p.field]
+    served = payload["provenance"][conflict.field]
     assert served["conflict"] is not None
-    assert served["conflict"]["others"][0]["provider"] == p.conflict["others"][0]["provider"]
+    assert served["conflict"]["others"][0]["provider"] == conflict.conflict["others"][0]["provider"]
     # Fields nobody disagreed about must not carry an empty conflict object.
-    uncontested = [f for f, v in payload["provenance"].items() if f != p.field and v["conflict"] is None]
+    uncontested = [f for f, v in payload["provenance"].items() if f != conflict.field and v["conflict"] is None]
     assert uncontested
 
 
-def test_a_contested_field_keeps_its_stored_value(db, ws):
+def test_a_contested_field_keeps_its_stored_value(db, ws, conflict):
     """The merge policy's promise: a contested update is never applied on confidence alone."""
     for p in _conflicted(db, ws):
         if not p.conflict["material"]:

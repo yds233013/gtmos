@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from gtmos.api.deps import actor, db_session, parse_uuid, row, workspace
+from gtmos.api.deps import actor, db_session, parse_uuid, require_admin, row, workspace
 from gtmos.domain import metrics
 from gtmos.domain.routing import route as route_rules
 from gtmos.domain.workflows import ACTIONS
@@ -36,6 +36,7 @@ from gtmos.services import (
     copilot,
     data_quality,
     experiments_service,
+    governance,
     operations,
     scoring_eval,
     stack_inspector,
@@ -191,6 +192,59 @@ def workflow_retry(
     retry_run(db, r)
     db.commit()
     return {"id": str(r.id), "status": r.status, "attempt": r.attempt, "error": r.error}
+
+
+# Governance ------------------------------------------------------------------------------------------
+
+
+@router.get("/governance")
+def governance_state(ws: Workspace = Depends(workspace)) -> dict[str, Any]:
+    """What GTMOS is currently allowed to do, and who paused it if it is paused."""
+    return governance.state(ws).as_dict()
+
+
+class SwitchBody(BaseModel):
+    switch: Literal["automation_enabled", "outbound_enabled", "crm_writes_enabled"]
+    enabled: bool
+    reason: str = Field(default="", max_length=500)
+
+
+@router.patch("/governance/switch", dependencies=[Depends(require_admin)])
+def governance_switch(
+    body: SwitchBody,
+    db: Session = Depends(db_session),
+    ws: Workspace = Depends(workspace),
+    who: str = Depends(actor),
+) -> dict[str, Any]:
+    out = governance.set_switch(db, ws, body.switch, body.enabled, who, body.reason)
+    db.commit()
+    return out.as_dict()
+
+
+class PauseBody(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/governance/pause", dependencies=[Depends(require_admin)])
+def governance_pause(
+    body: PauseBody,
+    db: Session = Depends(db_session),
+    ws: Workspace = Depends(workspace),
+    who: str = Depends(actor),
+) -> dict[str, Any]:
+    """Stop everything at once. A reason is required: the first question after an incident is why."""
+    out = governance.pause_all(db, ws, who, body.reason)
+    db.commit()
+    return out.as_dict()
+
+
+@router.post("/governance/resume", dependencies=[Depends(require_admin)])
+def governance_resume(
+    db: Session = Depends(db_session), ws: Workspace = Depends(workspace), who: str = Depends(actor)
+) -> dict[str, Any]:
+    out = governance.resume_all(db, ws, who)
+    db.commit()
+    return out.as_dict()
 
 
 # Routing ---------------------------------------------------------------------------------------------

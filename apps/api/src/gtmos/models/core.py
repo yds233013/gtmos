@@ -23,6 +23,16 @@ class Workspace(IdMixin, TimestampMixin, Base):
     # Seed data is generated relative to this instant so relative time windows stay meaningful.
     demo_anchor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Runtime kill switches. Environment variables gate what the system *can* do; these gate what it
+    # *is doing right now*, changeable by an operator in seconds without a deploy. Every automated
+    # system that touches customers needs a stop button that does not require an engineer.
+    automation_enabled: Mapped[bool] = mapped_column(default=True, server_default="true")
+    outbound_enabled: Mapped[bool] = mapped_column(default=True, server_default="true")
+    crm_writes_enabled: Mapped[bool] = mapped_column(default=True, server_default="true")
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paused_by: Mapped[str | None] = mapped_column(String(200))
+    paused_reason: Mapped[str | None] = mapped_column(Text)
+
 
 class User(IdMixin, TimestampMixin, Base):
     """A GTM team member who can own accounts (AE, SDR, AM) or operate the system (RevOps)."""

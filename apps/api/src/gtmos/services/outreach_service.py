@@ -25,6 +25,7 @@ from gtmos.models import (
     ResearchEvidence,
     Signal,
 )
+from gtmos.services import governance
 from gtmos.services.common import Conflict, NotFound, audit, utcnow
 from gtmos.services.research_service import generate_research, latest_report
 
@@ -198,6 +199,11 @@ def transition(db: Session, draft: MessageDraft, target: str, actor: str, reason
     ok, why = check_message_transition(draft.status, target, _blocked(draft))
     if not ok:
         raise Conflict(why)
+    # Approving is the moment a draft becomes something that can be sent, so it is what the outbound
+    # kill switch blocks. Editing and rejecting stay available: pausing outbound should not stop the
+    # team fixing the message that caused the pause.
+    if target in ("approved", "ready"):
+        governance.require(db, draft.workspace_id, "outbound_enabled")
     before = draft.status
     draft.status = target
     if target == "review":

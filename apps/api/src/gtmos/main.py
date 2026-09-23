@@ -25,6 +25,7 @@ from gtmos.services.common import (
     reset_correlation_id,
     set_correlation_id,
 )
+from gtmos.services.governance import Halted
 from gtmos.services.signal_service import InvalidSignal
 
 log = logging.getLogger("gtmos.api")
@@ -79,6 +80,12 @@ def create_app() -> FastAPI:
     @app.exception_handler(Conflict)
     async def _cf(request: Request, exc: Conflict) -> JSONResponse:
         return err(409, str(exc), request)
+
+    @app.exception_handler(Halted)
+    async def _halted(request: Request, exc: Halted) -> JSONResponse:
+        # 423 Locked: the request is valid and would normally succeed, but an operator has switched
+        # this capability off. A 403 would suggest the caller lacks permission, which is not the case.
+        return err(423, str(exc), request)
 
     @app.exception_handler(InvalidSignal)
     async def _is(request: Request, exc: InvalidSignal) -> JSONResponse:

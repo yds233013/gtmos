@@ -13,6 +13,11 @@ import { dateTime, num, titleCase } from "@/lib/format";
 import type { HealthStatus, Inspector, InspectorSection, Recommendation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { type CausalChain, CausalChains } from "./chains";
+
+/** The inspector payload plus the causal chains the service derives from the same queries. */
+type InspectorWithChains = Inspector & { causal_chains?: CausalChain[] };
+
 export const metadata = { title: "GTM Stack Inspector" };
 
 /** Where to go to fix or dig into each system. */
@@ -185,10 +190,10 @@ function SectionPanel({ section }: { section: InspectorSection }) {
 }
 
 export default async function StackInspectorPage() {
-  let data: Inspector | null = null;
+  let data: InspectorWithChains | null = null;
   let error: string | null = null;
   try {
-    data = await api<Inspector>("/stack-inspector");
+    data = await api<InspectorWithChains>("/stack-inspector");
   } catch (e) {
     error = e instanceof ApiError ? e.message : "The inspection failed to run.";
   }
@@ -197,7 +202,7 @@ export default async function StackInspectorPage() {
     <PageHeader
       title="GTM Stack Inspector"
       eyebrow={data ? `Inspected ${dateTime(data.generated_at)} · computed live from the GTMOS database` : "Systems audit"}
-      description="An automated audit of the go-to-market stack: CRM sync, enrichment, routing, data quality, product signals, attribution, automation and outbound. Each finding shows the evidence behind it and ends in a ranked list of automations worth building."
+      description="An automated audit of the go-to-market stack: CRM sync, enrichment, routing, data quality, product signals, attribution, automation and outbound. It starts with the causal chains — one root cause traced through its mechanism to the accounts it costs — then the per-system findings and a ranked list of automations worth building."
       actions={<RefreshButton pendingLabel="Inspecting…">Re-run inspection</RefreshButton>}
     />
   );
@@ -221,6 +226,10 @@ export default async function StackInspectorPage() {
   return (
     <div className="space-y-6">
       {header}
+
+      {/* First on the page on purpose: the chains are the only part that explains *why* the findings below
+          exist, and they are what a reader should take away. */}
+      <CausalChains chains={data.causal_chains ?? []} />
 
       <section aria-labelledby="overall-status" className="grid gap-4 lg:grid-cols-3">
         <div className={cn("rounded-lg border p-4 lg:col-span-2", overall.box)}>

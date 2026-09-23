@@ -7,12 +7,14 @@ import { api, settle } from "@/lib/api";
 import type { Workspace } from "@/lib/types";
 
 import { AuditSection } from "./audit-section";
+import { GovernanceSection } from "./governance-section";
+import type { GovernanceState } from "./governance-section";
 import { MappingSection, ReverseEtlSection } from "./hubspot-section";
 import { IntegrationsSection } from "./integrations-section";
 
 export const metadata = { title: "Settings" };
 
-const TABS = ["integrations", "hubspot", "reverse-etl", "audit"] as const;
+const TABS = ["integrations", "hubspot", "reverse-etl", "controls", "audit"] as const;
 
 function one(v: string | string[] | undefined): string | undefined {
   const s = Array.isArray(v) ? v[0] : v;
@@ -30,13 +32,14 @@ export default async function SettingsPage(props: PageProps<"/settings">) {
   if (action) auditQs.set("action", action);
   if (actorType) auditQs.set("actor_type", actorType);
 
-  const [ws, integrations, mapping, preview, objects, audit] = await settle(
+  const [ws, integrations, mapping, preview, objects, audit, governance] = await settle(
     api<Workspace & { outbound_send_enabled?: boolean }>("/workspace"),
     api<Integration[]>("/integrations"),
     api<HubspotMapping>("/integrations/hubspot/mapping"),
     api<ReverseEtlPreview>("/integrations/hubspot/reverse-etl/preview?limit=10"),
     api<SimulatedObjects>("/integrations/hubspot/simulated-objects?object_type=companies&limit=20"),
     api<AuditResponse>(`/audit?${auditQs.toString()}`),
+    api<GovernanceState>("/governance"),
   );
 
   return (
@@ -56,6 +59,7 @@ export default async function SettingsPage(props: PageProps<"/settings">) {
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="hubspot">HubSpot mapping</TabsTrigger>
           <TabsTrigger value="reverse-etl">Reverse ETL</TabsTrigger>
+          <TabsTrigger value="controls">Controls</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
         <TabsContent value="integrations">
@@ -70,6 +74,9 @@ export default async function SettingsPage(props: PageProps<"/settings">) {
         </TabsContent>
         <TabsContent value="reverse-etl">
           <ReverseEtlSection preview={preview} objects={objects} />
+        </TabsContent>
+        <TabsContent value="controls">
+          <GovernanceSection governance={governance} />
         </TabsContent>
         <TabsContent value="audit">
           <AuditSection audit={audit} action={action} actorType={actorType} />

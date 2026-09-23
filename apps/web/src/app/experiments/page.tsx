@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { metricLabel, VerdictBadge } from "@/components/insights/experiment-ui";
-import type { ExperimentRow } from "@/components/insights/types";
 import { Badge, DemoBadge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -10,13 +9,16 @@ import { Table, Td, Th, THead, Tr } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { date, num } from "@/lib/format";
 
+import { ActionBadge } from "./guardrail-ui";
+import type { GuardedExperimentRow } from "./types";
+
 export const metadata = { title: "Experiments" };
 
 export default async function ExperimentsPage() {
-  let rows: ExperimentRow[] | null = null;
+  let rows: GuardedExperimentRow[] | null = null;
   let error: string | null = null;
   try {
-    rows = await api<ExperimentRow[]>("/experiments");
+    rows = await api<GuardedExperimentRow[]>("/experiments");
   } catch (e) {
     error = e instanceof ApiError ? e.message : "Failed to load experiments";
   }
@@ -42,6 +44,7 @@ export default async function ExperimentsPage() {
                   <Th>Primary metric</Th>
                   <Th align="right">Units</Th>
                   <Th>Verdict</Th>
+                  <Th>Recommendation</Th>
                   <Th>Dates</Th>
                 </tr>
               </THead>
@@ -63,6 +66,14 @@ export default async function ExperimentsPage() {
                     </Td>
                     <Td>
                       <VerdictBadge verdict={e.verdict} />
+                    </Td>
+                    <Td>
+                      <ActionBadge action={e.action} />
+                      {e.guardrail_breaches.length > 0 && (
+                        <div className="mt-1 text-[11px] text-danger">
+                          {e.guardrail_breaches.map((m) => metricLabel(m).toLowerCase()).join(", ")} breached
+                        </div>
+                      )}
                     </Td>
                     <Td className="whitespace-nowrap text-xs text-muted">
                       {date(e.started_at)} – {e.ended_at ? date(e.ended_at) : "running"}

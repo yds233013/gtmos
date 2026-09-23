@@ -279,6 +279,26 @@ CAMPAIGNS = [
         {},
     ),
 ]
+# The provocative-subject arm. The extra replies the curiosity-gap subject earns are not buying intent —
+# it is the same offer in the same email, so the people who were going to be interested were already
+# replying. Most of the extra volume is an explicit brush-off; the rest goes nowhere.
+# Applied as a pass over the experiment's outcome rows once the journeys have run, never by nudging a
+# probability inside `_journey` — the journey's RNG draws are conditional on its own branches, so moving
+# one threshold desynchronises the stream for every account after it and silently rewrites the whole
+# dataset. Outcomes feed the experiments page and nothing else, so this arm distorts nothing upstream.
+CURIOSITY_EXTRA_REPLY_P = 0.22
+CURIOSITY_HOSTILE_SHARE = 0.42
+# Unsubscribes and spam complaints have no simulated activity of their own, so they are drawn per account
+# from a generator seeded off the account id: deterministic, and independent of the main RNG stream, so
+# adding them moves no other number in the dataset. (unsubscribe rate, spam complaint rate) per arm.
+GUARDRAIL_RATES: dict[str, tuple[float, float]] = {
+    "funding-vs-generic:control": (0.0040, 0.0003),
+    "funding-vs-generic:treatment": (0.0050, 0.0003),
+    "subject-question:control": (0.0050, 0.0005),
+    "subject-question:treatment": (0.0110, 0.0010),
+    "provocative-subject:control": (0.0050, 0.0005),
+    "provocative-subject:treatment": (0.0300, 0.0040),
+}
 REPLY_MULTIPLIER = {
     "funding-trigger:treatment": 1.9,
     "funding-trigger:control": 1.0,
@@ -510,13 +530,37 @@ def _icp_rules_workflows_integrations(c: Ctx) -> None:
                 {"field": "account.segment", "op": "in", "value": ["mid_market", "smb"]},
                 {"field": "account.region", "op": "in", "value": ["NA", "EMEA"]},
             ],
-            "pool_least_loaded",
+            # Round robin rather than least-loaded: SDR capacity is uniform, so even distribution is
+            # fairer than load, and hashing the account keeps a replay landing on the same rep.
+            "round_robin",
             None,
             "SDR Pool",
             False,
             "Everything else in covered regions starts with an SDR.",
         ),
+        (
+            "revops-triage",
+            "Unrouted → RevOps triage queue",
+            999,
+            [],
+            "pool_least_loaded",
+            None,
+            "Account Management",
+            False,
+            "Accounts no territory rule claims. A queue someone works, not an absence of an owner.",
+        ),
     ]
+    # Hours allowed between assignment and first outbound touch, per rule. Tighter where intent is
+    # fresh: a high-intent account that waits a day has usually moved on.
+    SLA_HOURS = {
+        "existing-customer": 48,
+        "strategic-high-intent": 4,
+        "enterprise-na": 24,
+        "enterprise-emea": 24,
+        "midmarket-high-intent": 8,
+        "smb-midmarket": 48,
+        "revops-triage": 72,
+    }
     for key, name, prio, conds, strat, user_id, team, override, desc in rules:
         c.db.add(
             RoutingRule(
@@ -532,6 +576,8 @@ def _icp_rules_workflows_integrations(c: Ctx) -> None:
                 assign_team=team,
                 overrides_existing_owner=override,
                 is_active=True,
+                sla_hours=SLA_HOURS.get(key),
+                is_fallback=key == "revops-triage",
             )
         )
     for wf in DEFAULT_WORKFLOWS:
@@ -686,7 +732,25 @@ def _campaigns(c: Ctx) -> None:
         campaign_id=c.campaigns["agent-launch"].id,
         started_at=c.d(-21),
     )
-    for e in (e1, e2):
+    # The cautionary tale. Primary metric is bare reply rate — deliberately the metric a team reaches for
+    # first — so the dataset contains a treatment that wins it and still must not ship.
+    e3 = Experiment(
+        id=uid("exp", "provocative-subject"),
+        workspace_id=c.ws.id,
+        key="provocative-subject",
+        name="Provocative subject line vs plain value subject",
+        hypothesis="A curiosity-gap subject line increases reply rate on the generic ICP play.",
+        null_hypothesis="Subject-line framing has no effect on reply rate.",
+        primary_metric="reply",
+        unit="account",
+        status="stopped",
+        salt="exp-provocative-v1",
+        min_sample_per_variant=250,
+        campaign_id=c.campaigns["icp-generic"].id,
+        started_at=c.d(-180),
+        ended_at=c.d(-1),
+    )
+    for e in (e1, e2, e3):
         c.db.add(e)
         c.experiments[e.key] = e
     c.db.flush()
@@ -722,6 +786,25 @@ def _campaigns(c: Ctx) -> None:
         ),
         "treatment": ExperimentVariant(
             id=uid("variant", "e2t"), experiment_id=e2.id, key="treatment", name="Question subject", weight=0.5
+        ),
+    }
+    c.variants["provocative-subject"] = {
+        "control": ExperimentVariant(
+            id=uid("variant", "e3c"),
+            experiment_id=e3.id,
+            key="control",
+            name="Plain value subject",
+            is_control=True,
+            weight=0.5,
+            description="States the topic: '<Account>: agent reliability'.",
+        ),
+        "treatment": ExperimentVariant(
+            id=uid("variant", "e3t"),
+            experiment_id=e3.id,
+            key="treatment",
+            name="Curiosity-gap subject",
+            weight=0.5,
+            description="Implies a problem the reader has to open the email to resolve, with no value claim.",
         ),
     }
     for vs in c.variants.values():
@@ -1050,6 +1133,71 @@ def _signals_for(c: Ctx, a: Account, p: CompanyProfile) -> None:
                 source="demo_web_analytics",
             )
 
+    _negative_signals(c, a, p)
+
+
+# Roughly the rate at which bad news actually shows up in a B2B list over a year. Deliberately not
+# rare: a taxonomy whose disqualifying half never fires is a taxonomy nobody checks.
+NEGATIVE_RATES: tuple[tuple[str, float], ...] = (
+    ("competitor_adopted", 0.05),
+    ("layoffs", 0.04),
+    ("budget_freeze", 0.035),
+    ("champion_departed", 0.03),
+    ("ai_project_cancelled", 0.02),
+    ("unsubscribed", 0.015),
+)
+
+
+def _negative_signals(c: Ctx, a: Account, p: CompanyProfile) -> None:
+    """Disqualifying signals, so the demo can show the score arguing against an account.
+
+    Correlated with maturity in the direction you would expect: a company with no AI programme cannot
+    cancel one, and a competitor displaces you where there is something to displace.
+    """
+    rng = c.rng
+    if a.is_flagship:
+        return  # the flagship's story is a clean win; bad news there would muddle the walkthrough
+    for stype, base in NEGATIVE_RATES:
+        rate = base
+        if stype in ("competitor_adopted", "ai_project_cancelled"):
+            rate *= 0.4 + 1.2 * p.ai_maturity
+        if rng.random() >= rate:
+            continue
+        days = -rng.uniform(5, 150)
+        title, explanation, confidence = {
+            "competitor_adopted": (
+                "Competitor platform adopted",
+                "Engineering blog and a conference talk describe a competing evaluation platform in production (DEMO).",
+                0.8,
+            ),
+            "layoffs": (
+                "Layoffs announced",
+                "Public reporting of a workforce reduction affecting engineering (DEMO).",
+                0.85,
+            ),
+            "budget_freeze": (
+                "Hiring and spending freeze",
+                "Leadership communication reported a freeze on new vendor spend this quarter (DEMO).",
+                0.7,
+            ),
+            "champion_departed": (
+                "Champion left the company",
+                "The contact driving the evaluation updated their profile to a new employer (DEMO).",
+                0.9,
+            ),
+            "ai_project_cancelled": (
+                "AI initiative shelved",
+                "The programme our product supports was publicly paused (DEMO).",
+                0.75,
+            ),
+            "unsubscribed": (
+                "Asked not to be contacted",
+                "A contact used the unsubscribe link. Treated as account-level suppression (DEMO).",
+                1.0,
+            ),
+        }[stype]
+        _signal(c, a, stype, days, title, explanation, confidence=confidence, source="demo_signal_feed")
+
 
 def _plg(
     c: Ctx, a: Account, p: CompanyProfile, *, force: dict[str, float] | None = None, user: Contact | None = None
@@ -1330,6 +1478,41 @@ def _historical_draft(c: Ctx, a: Account, contact: Contact, camp: str, when: flo
     return draft_id
 
 
+def _outcome(
+    c: Ctx, exp_unit: dict[str, Any], metric: str, at: float, value: float = 1.0, note: str | None = None
+) -> None:
+    c.outcome_rows.append(
+        {
+            "id": uid("outcome", f"{exp_unit['id']}:{metric}"),
+            "assignment_id": exp_unit["id"],
+            "metric": metric,
+            "value": value,
+            "occurred_at": c.d(at),
+            "source_activity_id": None,
+            "note": note,
+        }
+    )
+
+
+def _guardrail_outcomes(
+    c: Ctx, a: Account, exp_unit: dict[str, Any], arm: str, enroll: float, bounced_at: float | None
+) -> None:
+    """Bounce, unsubscribe and spam-complaint outcomes for one assigned account.
+
+    The bounce mirrors a real simulated bounce event; the other two have no activity of their own and are
+    drawn from a generator seeded off the account id. That keeps them reproducible in isolation and leaves
+    the run-wide RNG stream untouched, so adding guardrails moved no other number in the dataset.
+    """
+    if bounced_at is not None:
+        _outcome(c, exp_unit, "bounce", bounced_at, note="first send to the primary contact hard-bounced")
+    unsub_p, spam_p = GUARDRAIL_RATES[arm]
+    g = random.Random(uid("guardrail", str(a.id)).int)
+    if g.random() < unsub_p:
+        _outcome(c, exp_unit, "unsubscribe", min(enroll + g.uniform(0.2, 9.0), -0.5))
+    if g.random() < spam_p:
+        _outcome(c, exp_unit, "spam_complaint", min(enroll + g.uniform(0.2, 9.0), -0.5))
+
+
 def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
     rng = c.rng
     sigs = c.signals[a.id]
@@ -1394,6 +1577,27 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
                 "bucket": bucket,
             }
         )
+    elif camp == "icp-generic":
+        variant_key, bucket = assign_variant("exp-provocative-v1", str(a.id), [("control", 0.5), ("treatment", 0.5)])
+        var = c.variants["provocative-subject"][variant_key]
+        c.assignment_rows.append(
+            {
+                "id": uid("assign", f"e3:{a.id}"),
+                "experiment_id": var.experiment_id,
+                "variant_id": var.id,
+                "unit_id": a.id,
+                "account_id": a.id,
+                "assigned_at": c.d(enroll),
+                "exposed_at": c.d(enroll),
+                "bucket": bucket,
+            }
+        )
+    exp_key = {
+        "funding-trigger": "funding-vs-generic",
+        "agent-launch": "subject-question",
+        "icp-generic": "provocative-subject",
+    }.get(camp)
+    arm = f"{exp_key}:{variant_key}" if variant_key else None
 
     targets = sorted(
         c.contacts[a.id],
@@ -1457,10 +1661,12 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
     mult = REPLY_MULTIPLIER.get(f"{camp}:{variant_key}" if camp == "funding-trigger" else camp, 1.0)
     if camp == "agent-launch" and variant_key == "treatment":
         mult *= 1.1
+    provocative = arm == "provocative-subject:treatment"  # only the subject line differs inside the journey
     reply_p = min(0.5, (0.045 + 0.12 * prop) * mult)
     replied_at: float | None = None
     replier: Contact | None = None
     positive = False
+    bounced_at: float | None = None
     for t in targets:
         will_reply = rng.random() < reply_p
         reply_step = rng.randint(1, 3) if will_reply else 0
@@ -1471,6 +1677,8 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
             if replied_at is not None and d > replied_at:
                 break
             subj = (st.subject_template or "").replace("{hook}", a.name)
+            if provocative and st.step_number == 1:
+                subj = f"Is {a.name}'s agent stack about to break?"
             _activity(
                 c,
                 a,
@@ -1498,6 +1706,10 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
                     )
             else:
                 _activity(c, a, "email_bounced", d + 0.001, contact=t, campaign=camp, step=st, subject=subj)
+                # The guardrail counts the primary contact's first send only, so the experiment metric reads
+                # as a per-address bounce rate rather than "any bad address anywhere at this account".
+                if bounced_at is None and t is targets[0] and st.step_number == 1:
+                    bounced_at = d + 0.001
                 break
             if st.step_number == reply_step:
                 rd = d + rng.uniform(0.1, 3)
@@ -1528,10 +1740,12 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
                             summary="Interested: asked for time next week",
                         )
                 break
+    exp_unit = next((r for r in c.assignment_rows if r["unit_id"] == a.id), None)
+    if exp_unit and arm:
+        _guardrail_outcomes(c, a, exp_unit, arm, enroll, bounced_at)
     if replied_at is None or replier is None:
         return
     _transition(c, a, "engaged", replied_at, "Two-way engagement (reply)")
-    exp_unit = next((r for r in c.assignment_rows if r["unit_id"] == a.id), None)
     if exp_unit:
         c.outcome_rows.append(
             {
@@ -1547,6 +1761,8 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
     if not positive:
         if rng.random() < 0.3:
             _transition(c, a, "lost", replied_at + 0.01, "Replied: not interested")
+            if exp_unit:
+                _outcome(c, exp_unit, "negative_reply", replied_at + 0.01, note="explicit 'not interested' reply")
         return
     _transition(c, a, "qualified", replied_at + rng.uniform(0.5, 3), "Positive reply qualified on discovery screen")
     if exp_unit:
@@ -1662,6 +1878,29 @@ def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
                 "note": "value = opportunity amount (USD)",
             }
         )
+
+
+def _provocative_arm_outcomes(c: Ctx) -> None:
+    """Layer the curiosity-gap arm's extra replies onto the experiment, after every journey has run.
+
+    The treatment wins the primary metric and most of that win is hostile: the rest is a brush-off. The same
+    pass therefore produces both the lift and the negative-reply breach. It touches `experiment_outcomes`
+    only: no funnel transition, no score, no activity, and no draw from the run-wide generator — the
+    cautionary experiment must not be able to move a number anywhere else in the demo.
+    """
+    treatment = c.variants["provocative-subject"]["treatment"].id
+    replied = {r["assignment_id"] for r in c.outcome_rows if r["metric"] == "reply"}
+    for row in c.assignment_rows:
+        if row["variant_id"] != treatment or row["id"] in replied:
+            continue
+        g = random.Random(uid("curiosity", str(row["unit_id"])).int)
+        if g.random() >= CURIOSITY_EXTRA_REPLY_P:
+            continue
+        at = (row["assigned_at"] - c.anchor).total_seconds() / 86400 + g.uniform(0.5, 6.0)
+        at = min(at, -0.5)
+        _outcome(c, row, "reply", at, note="curiosity reply: opened by the subject, no interest in the offer")
+        if g.random() < CURIOSITY_HOSTILE_SHARE:
+            _outcome(c, row, "negative_reply", at + 0.01, note="told us to stop emailing")
 
 
 def _inbound_opportunities(c: Ctx, candidates: list[Account]) -> None:
@@ -2606,6 +2845,7 @@ def seed(
             _webinar(c, a)
         _journey(c, a, p)
     _inbound_opportunities(c, [a for a in c.accounts[1:] if a.id not in customers])
+    _provocative_arm_outcomes(c)
     defect_counts = _inject_defects(c)
 
     db.flush()
@@ -2650,6 +2890,19 @@ def seed(
     recompute_committees_bulk(db, live_accounts)
     rules, users, rule_ids = load_rules(db, ws.id), load_users(db, ws.id), rule_id_map(db, ws.id)
     chris = c.users["chris"]
+
+    # Named accounts: the biggest strategic accounts are assigned to the senior AE by agreement, and no
+    # territory rule may move them. Deterministic (largest first) so the demo shows the same set.
+    sam = c.users["sam"]
+    named = sorted(
+        (a for a in live_accounts if a.segment in ("strategic", "enterprise") and not a.is_customer and a.domain),
+        key=lambda a: (-(a.employee_count or 0), str(a.id)),
+    )[:12]
+    for a in named:
+        a.is_named_account = True
+        a.owner_id = sam.id
+    db.flush()
+
     for a in live_accounts:
         if a.funnel_stage == "prospect" and a.score_grade not in ("A", "B") and not a.is_customer:
             continue
