@@ -6,7 +6,7 @@ Recorded before any Phase 3 change, so every later claim can be diffed against a
 
 | | |
 |---|---|
-| Root | `/Users/yashshah2311/gtmos` |
+| Root | `~/gtmos` |
 | Branch | `main` |
 | HEAD | `cc209e9c2e2f61bdecc4a83bb4931e875d2da3db` (`cc209e9`, "Record the final commit hash in the Phase 2 report") |
 | Working tree | Clean — nothing staged, nothing untracked |
