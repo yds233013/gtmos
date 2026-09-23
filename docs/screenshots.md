@@ -2,13 +2,15 @@
 
 Every screen below is the running app in demo mode against the seeded **synthetic** dataset (2,006 simulated accounts, simulated CRM, deterministic AI; no external message is ever sent). Numbers are computed live from the database, but the underlying data is generated, not a real company's.
 
+Every figure in a caption describes **the shot above it**, not the app as it is running right now. Several of these pages report rolling windows, so a live page will drift from its screenshot by a signal or a tenth of a percent between captures. Where they disagree, the live app is current and the caption is a record of what was captured; the figures that are supposed to hold steady are generated into [`demo-numbers.md`](demo-numbers.md) instead.
+
 Captured at 1440x900, 2x pixel density, light mode. Pages that run past a few screens (accounts, scoring, signals, pipeline, routing, workflows, data quality, stack inspector, operations) were shot in a taller viewport rather than as a full-page ribbon, so the panels that matter stay readable.
 
 ## 1. Overview — command centre
 
 ![GTMOS command centre](screenshots/01-overview.png)
 
-Every headline number carries its denominator (2,006 accounts, 93% fully enriched; $5.6M pipeline created across 62 opportunities), and the cohort funnel fixes its denominator at 499 accounts first contacted in 90 days so later stages cannot be counted against a shrinking base.
+Every headline number carries its denominator (2,006 accounts, 93% fully enriched; $5.6M pipeline created across 62 opportunities), and the cohort funnel fixes its denominator at 498 accounts first contacted in 90 days so later stages cannot be counted against a shrinking base.
 
 ## 2. Accounts
 
@@ -20,7 +22,7 @@ All 2,006 accounts ranked by ICP score, with the five scoring categories (fit, i
 
 ![Flagship account score breakdown](screenshots/03-account-kestrel.png)
 
-The score breakdown traces every point to a named rule with its evidence, confidence, typical strength and half-life decay ("AI/ML hiring surge … 45-day half-life → 89% of 10 pts" = 8.9/10), and the provenance table records the source and confidence of each enriched field.
+The score breakdown traces every point to a named rule with its evidence, confidence, typical strength and half-life decay ("AI/ML hiring surge … 45-day half-life → 89% of 10 pts" = 8.8/10), and the provenance table records the source and confidence of each enriched field.
 
 ## 4. ICP and scoring model
 
@@ -38,7 +40,7 @@ The weights and signal point budgets are editable and versioned, and the "Does t
 
 ![Pipeline and attribution models](screenshots/06-pipeline.png)
 
-Four attribution models are shown side by side across 77 opportunities with the spread between them per campaign (up to 48%), then a worked example — one $320K Solstice Metrics deal where first touch gives a webinar 100% and last touch gives it 0% — plus an explicit note that none of these models is causal.
+Four attribution models are shown side by side across 77 opportunities with the spread between them per campaign (up to 96%), then a worked example — one $320K Solstice Metrics deal where first touch gives a webinar 100% and last touch gives it 0% — plus an explicit note that none of these models is causal.
 
 ## 7. Experiments
 
