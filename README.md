@@ -11,6 +11,33 @@
 
 ---
 
+## The short version
+
+Four things about this project that a longer read will confirm and a skim should not have to wait for.
+
+**One of its four integrations is verified by execution.** n8n runs locally in Docker on a pinned image
+and its workflows genuinely fire against this API. HubSpot runs on a simulated adapter whose live half has
+never touched a real portal. Clay and PostHog are contracts exercised locally against documented payload
+shapes; neither vendor has ever been called. The `/integrations` page says exactly that, in the product,
+and there is no "Connected" badge anywhere because three of the four have never been.
+
+**The scoring model does not work yet, and the repository is the thing that says so.** Structural AUC
+**0.537**, 95% interval 0.485–0.589 — not distinguishable from random on this data. The flattering,
+leakage-contaminated variant scores 0.593, and [`docs/scoring-evaluation.md`](docs/scoring-evaluation.md)
+explains why that number is the wrong one to quote.
+
+**The best-performing message is recommended against.** The seeded subject-line test lifts reply rate
++16.3 pp with p < 0.001, and the verdict is *do not ship*, because unsubscribes go 0.00% → 2.90%.
+Optimising the primary metric alone is how a team burns its sending domain.
+
+**Nothing here has ever sent a message to anyone, and no paid model call was made building it.** The
+default writer is deterministic. The data is synthetic and every surface labels it.
+
+If you have five minutes: open `/integrations`, then `/experiments/provocative-subject`, then
+[`docs/scoring-evaluation.md`](docs/scoring-evaluation.md). Those three are the argument.
+
+---
+
 ## Why I built this
 
 Modern GTM teams run on a patchwork: enrichment in Clay, scoring in a spreadsheet, routing in HubSpot
@@ -20,8 +47,10 @@ an explainable score, every signal becomes an action within minutes, every autom
 observable, and AI accelerates reps without becoming an unreviewed source of CRM truth.
 
 GTMOS is that system, built end to end: the data model, the deterministic engines, the integration boundaries
-and the operating surfaces. It shows I can design, build and operate GTM infrastructure myself rather than only
-configure SaaS tools.
+and the operating surfaces. The point of it is the judgement it encodes — which decisions belong in versioned
+code, which belong to a vendor, what a score is allowed to claim, and what a system should refuse to do — not
+the line count. Every one of those decisions is written down with its reasoning, so you can disagree with it
+specifically.
 
 ## What it does
 
