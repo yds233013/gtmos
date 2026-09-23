@@ -26,10 +26,18 @@ function Metric({ label, value, tone }: { label: string; value: React.ReactNode;
   );
 }
 
+/** A failure older than the health window did not feed the pill above it. Say so, rather than
+ *  leaving a green "Healthy" sitting on top of a red error strip with no explanation. */
+function outsideWindow(at: string | null, days: number): boolean {
+  if (!at) return false;
+  return Date.now() - new Date(at).getTime() > days * 86_400_000;
+}
+
 export function IntegrationCard({ i }: { i: IntegrationStatus }) {
   const w = i.window;
   const latency = w.latency.inbound_p50_ms ?? w.latency.sync_p50_ms;
   const latencyLabel = w.latency.inbound_p50_ms !== null ? "Inbound p50" : "Sync p50";
+  const staleFailure = outsideWindow(i.last_failure_at, w.days);
   return (
     <li className="flex flex-col rounded-lg border border-border bg-panel">
       <header className="flex flex-col gap-2 border-b border-border px-4 py-3">
@@ -82,8 +90,14 @@ export function IntegrationCard({ i }: { i: IntegrationStatus }) {
         </dl>
 
         {i.last_failure && (
-          <p className="break-words rounded bg-danger-soft px-2 py-1 text-[11px] text-danger">
+          <p
+            className={cn(
+              "break-words rounded px-2 py-1 text-[11px]",
+              staleFailure ? "bg-panel-2 text-muted" : "bg-danger-soft text-danger",
+            )}
+          >
             Last failure {relTime(i.last_failure_at)}: {i.last_failure}
+            {staleFailure && <span> — older than the {w.days}-day window, so it does not affect health.</span>}
           </p>
         )}
       </div>

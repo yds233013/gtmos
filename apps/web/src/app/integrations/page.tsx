@@ -42,19 +42,43 @@ export default async function IntegrationsPage() {
       />
 
       <StatGrid>
-        <StatCell label="Boundaries" value={num(items.length)} sub="HubSpot · n8n · PostHog · Clay" />
-        <StatCell label="Verified by execution" value={num(verified)} sub="Ran against a real instance" />
-        <StatCell label="Verified locally" value={num(local)} sub="Contract exercised, no account" />
-        <StatCell label="Simulated or unrun" value={num(simulated)} sub="Live adapter never executed" />
+        {/* Six columns is a tight measure — each `sub` is kept short enough to survive the
+            truncation rather than trailing off mid-word. The long form is the `hint`. */}
+        <StatCell
+          label="Boundaries"
+          value={num(items.length)}
+          sub="Tools in the stack"
+          hint="HubSpot, n8n, PostHog and Clay"
+        />
+        <StatCell
+          label="Verified by execution"
+          value={num(verified)}
+          sub="Ran for real"
+          hint="Requests were genuinely exchanged with a real running instance of the tool"
+        />
+        <StatCell
+          label="Verified locally"
+          value={num(local)}
+          sub="Contract only"
+          hint="The documented payload shape was exercised against GTMOS's own endpoint. No account exists."
+        />
+        <StatCell
+          label="Simulated or unrun"
+          value={num(simulated)}
+          sub="Live adapter unrun"
+          hint="Exercised through the simulated adapter. The live adapter has never executed."
+        />
         <StatCell
           label="Real services reached"
           value={`${num(reached)} of ${num(items.length)}`}
-          sub="Anything else has never talked to the vendor"
+          sub="The rest, never"
+          hint="Every other boundary has never talked to the vendor"
         />
         <StatCell
           label={`Errors · ${status.window_days}d`}
           value={<span className={errors > 0 ? "text-warning" : undefined}>{num(errors)}</span>}
-          sub="Failed deliveries and sync runs"
+          sub="Deliveries and syncs"
+          hint="Failed inbound deliveries and failed sync runs, combined"
         />
       </StatGrid>
 
