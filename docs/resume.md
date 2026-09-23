@@ -12,7 +12,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 
 - Built an end-to-end GTM operating system (FastAPI, PostgreSQL, Redis/RQ, Next.js) that scores, enriches,
   routes and researches **2,000 accounts** and drafts evidence-grounded outreach behind a human approval queue;
-  **40-table** schema, **84** REST endpoints, **19** product pages.
+  **40-table** schema, **90** REST endpoints, **19** product pages.
 - Designed an **explainable account-scoring engine** (fit, intent, timing, technical, engagement) as a pure,
   deterministic function with signal half-life decay, ICP versioning and reproducible input hashes; every point
   is attributed to a rule and its evidence.
@@ -25,7 +25,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 - Engineered a **HubSpot integration boundary** (demo + live adapters) using batch upserts on a custom unique
   property (HubSpot doesn't enforce domain uniqueness), 429/5xx retry, payload-hash change detection and a
   reverse-ETL job for computed account properties.
-- Secured inbound webhooks (PostHog, n8n, HubSpot v3) with HMAC signatures, replay windows, event-id dedupe and
+- Secured inbound webhooks (PostHog, n8n, Clay, HubSpot v1/v2/v3) with HMAC signatures, replay windows, event-id dedupe and
   replay; closed an **idempotency-key poisoning** vulnerability where an unsigned delivery could block a later
   valid event.
 - Grounded LLM research and personalization in numbered evidence packs with **citation validation** and
@@ -53,12 +53,34 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 - Wrote an **evaluation harness for generated content** (citation validity, number grounding, banned claims,
   prompt-injection resistance, determinism) which found untrusted feed text being copied verbatim into
   research reports, and fixed it with sentence-level sanitisation at the trust boundary.
+- Ran **six n8n workflows** against a pinned local n8n 2.40.5 container and the live API — signed forwarding,
+  scheduled reverse-ETL, an error-handler workflow made to fail on purpose, and one built specifically to prove
+  that three deliveries of the same HubSpot event array (incrementing `attemptNumber`, reordered members)
+  produce exactly one stored event.
+- Audited the **HubSpot adapter against current documentation** and corrected three things that would have
+  failed on first contact with a real portal: private apps sign webhooks with **v1** (plain SHA-256, no
+  timestamp and therefore no replay window) rather than v3, the URI must be hashed as sent rather than
+  percent-decoded, and association type ids 1/2/5/6 are the **primary** variants — writing only the general
+  279/341 produces records that look associated in the UI and behave as orphans in a report.
+- Defined a **product-qualified account rule** from PostHog-shaped events: composite and account-level over a
+  14-day window, weighted toward acts with switching costs, thresholded so no single criterion qualifies an
+  account alone, and fired once per account per week so a rep does not learn to ignore it.
+- Built an **integrations observability surface** that separates *mode* from *verification* and refuses a
+  "Connected" state — every figure is derived from stored deliveries and sync runs, three of four boundaries
+  carry an explicit "real service never reached" badge, and credential requirements report presence, never value.
+- Ran a **failure tournament** over five invariants (no duplicate revenue action, no silent corruption, no
+  unbounded retry, no unsupported field overwrite, no lost audit trail), which found permanently-invalid
+  payloads being retried forever and led to a permanent/retryable split returning `422` instead of `202`.
+- Found and fixed a **prompt-injection vulnerability opened by the project's own new enrichment integration**:
+  a poisoned `industry` value produced a research brief repeating the injected instruction with a citation.
+  The lesson generalises — a trust boundary is a property of where data comes from, not of which field it
+  lands in, so adding an integration silently reclassifies fields that were previously safe.
 - Modelled the operational database into **analytics marts with dbt** (19 models, 132 tests) and verified the
   marts against the API's semantic layer so the two cannot silently drift.
 - Built a **GTM Stack Inspector** and data-quality engine (12 rules, audited remediation such as contact and
   account merges) that computes system health and ranks automation opportunities with traceable evidence.
 - Shipped with **461 backend tests** (210 unit + 251 Postgres integration), **14 component tests** and a
-  **22-test Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command
+  **25-test Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command
   Docker Compose stack.
 
 ## Short version (one line)
@@ -66,13 +88,15 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 Built GTMOS, an AI-native GTM system (FastAPI/Postgres/Next.js) with explainable account scoring measured by
 an offline backtest, an enrichment waterfall that surfaces provider disagreement, idempotent workflows, a
 HubSpot reverse-ETL boundary, signed webhook ingestion, experiment guardrails that can reject a winning
-variant, and evidence-grounded AI outreach behind human approval; 353 automated tests.
+variant, and evidence-grounded AI outreach behind human approval; 500 automated tests.
 
 ## How to talk about scope honestly
 
 - Say "synthetic dataset of 2,000 accounts" and "demo/simulated integrations", not "processed X leads".
 - The HubSpot and Apollo live adapters are **implemented, not validated against live accounts**.
-- The n8n templates were **verified to import** into n8n 2.40.5; they were not run against live feeds.
+- The n8n workflows **genuinely execute** against a local n8n 2.40.5 container and the running API — that is
+  the one integration verified by execution. PostHog and Clay are contracts exercised locally against the
+  documented payload shapes; neither vendor service has ever been called.
 - The scoring backtest measures a **heuristic on simulated data**. Say "built the evaluation harness and it
   showed the non-leaking part of the score is not distinguishable from random on this dataset" — that is the
   honest and more impressive statement, because it demonstrates the measurement rather than a result.
