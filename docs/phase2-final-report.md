@@ -313,5 +313,6 @@ baseline `70d6938`.
 
 ## 18. Final commit hash
 
-Recorded on the commit that adds this report; `git log --oneline -1` after it prints the exact hash.
-The Phase 2 range is `70d6938..HEAD`.
+This report was added in `41dabbd`. The commit you are reading now amends the hash into the document
+itself, so run `git log --oneline -1` for the exact current HEAD. The Phase 2 range is
+`70d6938..HEAD`, 22 commits.
