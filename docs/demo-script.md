@@ -1,7 +1,9 @@
-# Demo script (≈10 minutes)
+# Demo script (≈11 minutes)
 
 Start from a fresh dataset for a predictable story: `make reset`, then open http://localhost:3010.
-Everything shown is **DEMO** data and **SIMULATED** integrations; say so up front.
+Everything shown is **DEMO** data. The integrations are not uniformly simulated and it is worth being
+precise about that up front: n8n genuinely executes, HubSpot runs on a simulated adapter, and Clay and
+PostHog are contracts exercised locally. Section 8 shows the product saying exactly that about itself.
 
 > **Opening line (15 s):** "GTMOS is the system a GTM engineer builds so a sales team always knows who to
 > call, why now, and what to say, and so RevOps can see whether the machine is working. It's deterministic
@@ -77,11 +79,29 @@ Everything shown is **DEMO** data and **SIMULATED** integrations; say so up fron
 - **Operations**: failure rates, dead letters, sync jobs (SIMULATED), webhook health, provider hit/error
   rates, correlation IDs.
 
+## 8. What is it actually connected to? (1 min): `/integrations`
+
+The beat that separates this from a mockup, so do not skip it — and lead with the honesty, not the features.
+
+- Point at the headline: **"Real services reached: 1 of 4."** Say out loud that three of these four boundaries
+  have never talked to the vendor, and that the page says so itself rather than showing four green badges.
+- **n8n** is the one that is green: it runs in Docker on a pinned 2.40.5, the workflows fire against this API
+  for real, and the deliveries listed underneath are those executions. Click into it — error rate, signature
+  status per delivery, and a correlation id on every row.
+- **HubSpot** is `Demo`: the simulated adapter is exercised end to end and every sync it performs is labelled
+  SIMULATED. The live adapter is implemented against the documented batch-upsert API and has never run against
+  a real portal. "Still required to make this live" lists exactly what is missing, by name, never by value.
+- **Clay** and **PostHog** are `Test`: the documented payload shapes are accepted, verified, deduplicated and
+  turned into signals — but nothing has ever been received from either vendor.
+
+If someone asks why you did not just fake it: because a page that says "Connected" four times tells the reader
+nothing, and the first thing a real integration does is fail in a way you have to be able to see.
+
 ## Closing (15 s)
 
 "This is the infrastructure layer of GTM: explainable targeting, evidence-grounded AI with humans in the loop,
-idempotent automation, and a system that audits itself. With credentials, the same boundaries talk to HubSpot,
-PostHog and Claude."
+idempotent automation, and a system that audits itself. One of its four boundaries already executes against a
+real tool; the other three are built against documented contracts and are waiting on an account, not on code."
 
 ## If something goes wrong
 
