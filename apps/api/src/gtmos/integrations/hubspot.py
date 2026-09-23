@@ -110,6 +110,7 @@ class AssociationRequest:
     from_id: str
     to_id: str
 
+
 DEAL_STAGE_MAP = {
     "discovery": "appointmentscheduled",
     "evaluation": "qualifiedtobuy",
@@ -353,7 +354,6 @@ class RealHubSpotAdapter:
                 msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
                 out.results.extend(UpsertResult(r.internal_id, "failed", error=msg, retryable=retryable) for r in batch)
         return out
-
 
     def associate(self, from_type: str, to_type: str, pairs: list[AssociationRequest]) -> BatchOutcome:
         """Create HubSpot-defined associations in batches.

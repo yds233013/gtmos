@@ -27,6 +27,7 @@ from gtmos.models import (
 )
 from gtmos.services import clay_service, crm_sync, webhook_service
 from gtmos.services.product_events import ingest_events
+from gtmos.services.webhook_service import PermanentError
 
 router = APIRouter(tags=["integrations"])
 
@@ -162,7 +163,7 @@ def _posthog_processor(ws: Workspace) -> webhook_service.Processor:
         try:
             events = [normalize(e) for e in parse_payload(payload)]
         except ValidationError as exc:
-            raise ValueError(f"invalid PostHog payload: {exc.error_count()} validation error(s)") from exc
+            raise PermanentError(f"invalid PostHog payload: {exc.error_count()} validation error(s)") from exc
         results = ingest_events(db, ws.id, events)
         return {
             "events": len(results),
@@ -185,7 +186,7 @@ def _signal_processor(ws: Workspace) -> webhook_service.Processor:
             try:
                 body = SignalIn.model_validate(item)
             except ValidationError as exc:
-                raise ValueError(f"invalid signal: {exc.errors()[0]['msg']}") from exc
+                raise PermanentError(f"invalid signal: {exc.errors()[0]['msg']}") from exc
             out.append(ingest_signal_payload(db, ws, body))
         return {"signals": out}
 

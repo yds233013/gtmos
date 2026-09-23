@@ -206,7 +206,22 @@ def _finish(
         ev.error = "body is not valid JSON"
         return ReceiveResult(ev, False, 400)
     _process(db, ev, payload, processor)
-    return ReceiveResult(ev, False, 200 if ev.status == "processed" else 202)
+    if ev.status == "processed":
+        return ReceiveResult(ev, False, 200)
+    # 422 for a body that can never work, 202 for one worth retrying. The distinction is what stops a
+    # well-behaved sender from redelivering a malformed payload ten times.
+    return ReceiveResult(ev, False, 422 if ev.status == "rejected" else 202)
+
+
+class PermanentError(Exception):
+    """The delivery can never succeed, however many times it is sent.
+
+    A malformed body, a missing required field, an unknown event shape. Distinguished from a transient
+    failure because the two deserve opposite answers: a transient failure should be retried, and telling
+    a sender to retry a body that is structurally wrong makes it hammer the endpoint until the event
+    dead-letters. HubSpot retries ten times over 24 hours on a non-2xx, so that is ten guaranteed-futile
+    deliveries per bad payload.
+    """
 
 
 def _process(db: Session, ev: WebhookEvent, payload: Any, processor: Processor) -> None:
@@ -216,6 +231,10 @@ def _process(db: Session, ev: WebhookEvent, payload: Any, processor: Processor) 
             ev.result = processor(db, payload)
         ev.status = "processed"
         ev.error = None
+    except PermanentError as exc:
+        # Rejected, not failed: the sender should stop, and `replay` should not offer to re-run it.
+        ev.error = f"{exc.__class__.__name__}: {exc}"[:2000]
+        ev.status = "rejected"
     except Exception as exc:
         ev.error = f"{exc.__class__.__name__}: {exc}"[:2000]
         ev.status = "dead_letter" if ev.attempts >= MAX_ATTEMPTS else "failed"

@@ -367,3 +367,183 @@ The result syncs to `gtmos_next_best_action`. *Demo:* Kestrel's is "Multi-thread
 - Three candidate chains were **dropped** because the data did not support them: invalid email → bounce (0 of 30 bounces hit currently-invalid contacts), bounce → re-send, and duplicate account → attribution error.
 
 **Trade-offs.** Intersection is conservative: a real mechanism that operates through a different path shows as a weak chain. And several of these are still correlational — a region's unowned rate correlating with having no rule is not proof — so each chain carries an explicit confidence basis of "mechanism" or "correlation".
+
+---
+
+## Tool ownership: the bought stack around the built core
+
+These are the Phase 3 questions. The boundary they all come back to is one sentence from
+[`docs/phase3-architecture.md`](phase3-architecture.md): **buy the commodity, orchestrate the plumbing,
+own the judgement.** The verification status of each integration differs, and every answer below says
+which one it is talking about.
+
+### 28. Why use Clay instead of building enrichment yourself?
+
+**Thesis.** Clay's product is the provider network, not the waterfall. You can write a waterfall in an afternoon; you cannot negotiate forty data contracts in one. Buy the contracts, keep the merge policy.
+
+**Specifics.**
+- **GTMOS already built the mechanics, deliberately, and then stopped.** `domain/enrichment.py::run_waterfall` does per-field provider ordering (`employee_count: [firmographics, apollo, webscan]`, `technologies: [webscan, apollo]`), one call per provider per run with the response cached for later positions, and outcomes of `hit | miss | low_confidence | error | skipped` with latency and credit cost on every attempt. Three providers, all simulated, coverage 70–82%, error rates 2–5%, 0.5–1.0 credits per call (`integrations/enrichment_providers.py`). That proves the mechanics are understood. It proves nothing about coverage, because coverage is bought.
+- **What you would actually be rebuilding** is vendor management: contracts, per-vendor rate limits and quotas, credit accounting across vendors, schema drift when one changes a field, and a legal review per data processor. None of that is code.
+- **What GTMOS keeps, and would keep with Clay in place.** The merge policy (`domain/enrichment.py::decide`): manual locks always win; an update needs ≥ 0.10 more confidence, or a stale existing value (> 180 days) at equal confidence; a provider that confirms an existing value raises its confidence. Plus provenance per field (`FieldProvenance`: source, confidence, time, run), so "where did 850 employees come from?" is one click. A Clay value enters through exactly this policy. It gets no special authority for having been bought.
+- **The integration is built and unverified.** `integrations/clay.py`, `services/clay_service.py`, `POST /api/v1/webhooks/clay`. Signature verification, column mapping and aliasing, partial-row handling, idempotency on `clay_row_id`/`clay_run_id` and 402/429 backoff are all tested under `httpx.MockTransport`. **No Clay account exists and no request has ever been made to `clay.com`.** [`docs/clay-live-setup.md`](clay-live-setup.md) §9 lists what is and is not proven, including the biggest open question: whether a real Clay HTTP API column can be configured to send a signed request at all.
+- **Cost shapes the answer.** The Clay → GTMOS push needs an in-table HTTP API column, which is a **Growth** feature at $495/mo. The free Public API can only tell you a run finished. So "buy Clay" is a real budget line, not a free win, and at low volume a direct Apollo or Clearbit contract may beat it.
+
+**Trade-offs.** Buying Clay means your enrichment logic partly lives in a spreadsheet UI that is not in version control and has no test suite — the same objection this repo makes to putting revenue logic in an n8n canvas. The mitigation is that Clay only ever *proposes* values; GTMOS decides whether to believe them, and that decision is in Python with tests. At the scale where you have direct vendor contracts and a golden-record service, Clay becomes the prototyping layer rather than the production path.
+
+### 29. Why run n8n when GTMOS has its own workflow engine?
+
+**Thesis.** They run different things. GTMOS's engine runs GTM *semantics* and must be reviewable in a diff; n8n runs *plumbing* and must be changeable without a deploy. Conflating them is how business logic ends up on a canvas nobody can test.
+
+**Specifics.**
+- **The split, concretely** (`docs/phase3-architecture.md`): GTMOS's engine runs score → qualify → research → draft → route → sync, in version-controlled Python, with idempotency keys (`wf:{key}:v{version}:{trigger}:{event_id}`, unique), persisted step state, row-locked execution, retries that resume at the failed step, and a dead letter queue (`services/workflow_engine.py`). n8n runs schedules, filters, reshaping and fan-out, with its own retries, error workflow and execution history. Failure blast radius: one account's run versus one integration hop.
+- **The rule.** Anything that decides revenue lives in GTMOS; anything that moves bytes between systems lives in n8n. A scoring change should be reviewable in a diff. Adding a Slack notification should not need one.
+- **What the six templates in `integrations/n8n/` actually do.** Normalise an external alert into the `SignalIn` contract and HMAC-sign it (01); filter PostHog events to six GTM-relevant names and forward them (02); run the reverse-ETL diff hourly and sync only if something changed (03); rescore on a fit-relevant HubSpot property change (04); relay CRM webhooks (05); handle errors (06). Every Code node in them does field mapping or signing and nothing else.
+- **Template 04 is the clearest illustration.** It keeps only `numberofemployees`, `industry`, `country` and `domain`. GTMOS's own `gtmos_*` writes are not on that list, so a GTMOS sync cannot trigger a rescore loop. That is a plumbing decision expressed in plumbing, and a RevOps person can add `annualrevenue` to it without a pull request.
+- **Verification status, which is unusual here.** n8n is the one integration **verified by execution**: it runs locally in Docker pinned to **2.40.5**, reaches the API at `host.docker.internal:8010`, and `make golden-flow VIA_N8N=1` routes three real product events through `http://localhost:5678/webhook/gtmos-posthog` into `/api/v1/webhooks/posthog`. Note that [`docs/n8n.md`](n8n.md)'s "What was verified" section is narrower — it records only a successful CLI import of the templates — so the golden flow is the stronger claim of the two.
+
+**Trade-offs.** n8n is another service to run, another credential store, and another place a secret can leak: `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, which the templates require, exposes *every* environment variable to anyone who can edit a workflow there. Its webhook URLs are unauthenticated by default. And the boundary is a judgement call, not a law — "filter noisy events before they reach GTMOS" is arguably a revenue decision, since a filter that drops `trace_volume_threshold` silently kills PQL detection. If I could not defend a piece of logic as pure transport, I would move it into GTMOS.
+
+### 30. What belongs in HubSpot versus GTMOS?
+
+**Thesis.** HubSpot owns the record a rep edits and the application a rep works in. GTMOS owns computed judgement and writes it into a namespace it alone controls. The boundary is per field, decided in advance, and enforced in code rather than documented.
+
+**Specifics.**
+- **HubSpot owns:** companies, contacts, deals as the system of record, plus sequences, tasks, calls, forecasting, permissions and mobile. None of it is differentiating to rebuild, and the moment your custom system becomes where reps work, you own a CRM and you will lose.
+- **GTMOS writes exactly eight fields on a company**, all namespaced: `gtmos_account_id`, `gtmos_icp_score`, `gtmos_score_grade`, `gtmos_intent_score`, `gtmos_account_tier`, `gtmos_last_signal`, `gtmos_next_best_action`, `gtmos_last_scored_at`. Plus `name` and `domain` **on create only**. Then `gtmos_contact_id` / `gtmos_buying_role` on contacts and `gtmos_opportunity_id` on deals (`integrations/hubspot.py::CUSTOM_PROPERTIES`).
+- **The rule is enforced, not documented.** `crm_sync.plan_company_sync` builds the update payload from `gtmos_*` keys only, so a reverse-ETL push structurally cannot clobber a rep's correction. `full_record` (name and domain) applies on create.
+- **GTMOS owns the judgement:** the ICP and its versions, the score and its explanation, signal normalisation and decay, identity resolution, the PQL rule, buying-committee inference, research and its guardrails, routing with territories and SLAs, workflow semantics, experiments, attribution, data quality, the kill switches. The test for whether something belongs here: **would a reasonable GTM leader want to argue with it?** If yes it needs to be explainable, versioned and diffable, which means code you own.
+- **Inbound CRM changes are logged, never applied** (`api/routes/integrations.py::webhook_hubspot`). See Q32.
+- **Status.** `RealHubSpotAdapter` has never run against a real portal — no HubSpot account existed. [`docs/hubspot-live-setup.md`](hubspot-live-setup.md) is the exact path to changing that, and its last section lists the five gaps.
+
+**Trade-offs.** Ten unique properties per object is HubSpot's ceiling and `gtmos_account_id` spends one of them; the constraint cannot be added retroactively, so getting it wrong means starting over with a new property name. A stricter version of this boundary would put nothing in the CRM at all and surface scores in an embedded card — better hygiene, worse adoption, because a field reps can filter and build lists on is a field they use.
+
+### 31. Why is PostHog useful to a GTM team, and how would you identify a PQL?
+
+**Thesis.** In a product-led business the strongest buying signal arrives before anyone fills in a form, and it is account-shaped. PostHog's group analytics is what makes a product event an *account* fact. A PQL is then a composite, windowed, account-level rule — never a single event.
+
+**Specifics.**
+- **Why buy PostHog.** Capture at volume, person and group identity, session context and a query layer are solved with a known cost curve. Rebuilding capture and storage produces a worse PostHog. What GTMOS takes is the **group key**: `$groups.company` is what turns "a user did something" into "this account did something".
+- **What GTMOS does not delegate.** What the behaviour *means*. PostHog can tell you three people from one domain connected an integration; it has no opinion about whether that is worth a rep's afternoon.
+- **The PQL rule** (`domain/pql.py`): a 14-day window, at the account level, scored out of a threshold of **55**.
+
+  | Criterion | Points | Why |
+  |---|---:|---|
+  | Three or more distinct users | 25 | A team, not an individual |
+  | A second user joined | 10 | Credited only when the stronger one did not fire, so a team of five is not paid twice |
+  | Connected a production integration | 30 | Switching costs behind it — a decision, not an intention |
+  | Crossed the usage threshold | 25 | Real traffic. Adoption rather than evaluation |
+  | Viewed pricing | 10 | Commercial intent, but cheap to fake; a rep checking a competitor looks identical |
+
+  The highest single criterion is 30 against a bar of 55, so **no single criterion qualifies an account alone** — at least two independent kinds of evidence are structurally required.
+- **Breadth before depth**, and **depth of integration over stated intent**, are the two opinions the weights encode. `distinct_users` counts the resolved contact where there is one and the raw `distinct_id` otherwise (`services/product_events.py::distinct_product_users`), because a team evaluating a product rarely has every member matched to a CRM contact, and refusing to count the unmatched ones would systematically under-qualify exactly the accounts worth calling.
+- **It fires once.** Dedupe is on `pql:{account_id}:{ISO year}-W{week}` (`pql.window_ref`). An account that stays qualified does not emit a fresh alert every day; an alert that repeats daily is one a rep learns to ignore.
+- **Not-qualified is a first-class answer.** `evaluate_pql` returns the assessment either way, with `met`, `missing` and the closest missing criterion, because "why is this account *not* qualified" is the question a rep actually asks.
+- **Cost caveat, stated before anyone builds.** Group analytics is a **paid add-on** enabled from PostHog's billing page. First 1M events/month is $0 but it requires a card, and once on, the meter counts **all identified events** in the project, not just those carrying `$groups`. Self-hosting does not rescue this: group analytics and data pipelines are the two features explicitly absent from self-hosted ([`docs/research/posthog.md`](research/posthog.md) §3.5, §8.4).
+- **Status.** The parser, matching, thresholding, PQL rule and webhook pipeline are tested and run end to end by `make golden-flow`. **No PostHog project exists**; nothing in §2–4 or §7.2 of [`docs/posthog-live-setup.md`](posthog-live-setup.md) has been executed.
+
+**Trade-offs.** The weights and the threshold are hand-set, exactly like the ICP score, and `docs/scoring-evaluation.md` applies to them just as much: this encodes a defensible opinion about product-led qualification, not a calibrated one. The right version comes from conversion data — which usage behaviours actually predict paid conversion — and that needs outcomes plus a holdout, neither of which exists here. Set it too aggressively and sales interrupts happy self-serve users, which costs more than the missed call.
+
+### 32. How do you prevent CRM sync loops?
+
+**Thesis.** A loop needs a cycle. Break it structurally by giving each field exactly one writer and never auto-applying inbound changes — not by adding a "was this us?" check, which is a race waiting to happen.
+
+**Specifics.** Four independent breaks, any one of which is sufficient:
+1. **Inbound changes are logged, never applied.** `webhook_hubspot` verifies the signature, stores the event and acknowledges it. No handler writes back. The cycle GTMOS writes a field → HubSpot fires a change webhook → GTMOS applies it → writes again cannot start, because the third step does not exist.
+2. **One-way field ownership.** GTMOS writes only `gtmos_*` (plus name and domain on create). Reps own everything else. There is no field both systems write.
+3. **Payload-hash change detection.** `crm_sync.payload_hash` compares against `ExternalRecord.last_payload_hash` — what GTMOS last *sent*. An unchanged record is skipped before any HTTP call, so even a spurious trigger produces no write.
+4. **The trigger filter is narrow.** n8n template 04 rescores only on `numberofemployees`, `industry`, `country` and `domain`. No `gtmos_*` property is on that list, so a GTMOS write cannot trigger a GTMOS rescore even through the orchestration layer.
+
+An analogous rule protects enrichment: `FieldProvenance.is_manual_lock` means a rep's correction beats any provider, so the enrichment loop (provider overwrites human, human re-fixes, provider overwrites again) is also structurally closed.
+
+**Trade-offs.** The cost of break 1 is that two-way sync does not exist: a rep who edits `gtmos_icp_score` in HubSpot is silently overwritten on the next change, and GTMOS never learns anything from the CRM. The cost of break 3 is the opposite failure — GTMOS compares against what it last sent, not what HubSpot currently holds, so **drift is invisible**. `external_records.remote_updated_at` exists in the schema and is never read or written. The fix is a reconciliation job that reads CRM values, diffs them against desired state and reports drift; it is designed in `docs/crm-sync-design.md` and not built. There is also no optimistic-concurrency check on `updatedAt`, so a rep editing mid-sync can lose the edit within the fields GTMOS owns.
+
+### 33. How do you handle duplicate webhooks?
+
+**Thesis.** Every sender is at-least-once. Derive an idempotency key that is identical across redeliveries of the same event and distinct across different ones, enforce it with a database constraint, and be extremely careful about what goes into it — this is where the bug was.
+
+**Specifics** (`services/webhook_service.py`).
+- **The key waterfall:** an explicit `Idempotency-Key` / `X-Idempotency-Key` header; then an event id from the payload, tried as `uuid`, `event_id`, `eventId`, `id`; then, for a JSON array where every member has an id, `{source}:batch:{sorted ids}` (collapsed to a sha256 of the ids if it would exceed the 200-char column); then a hash of a canonicalised body. Enforced by `UniqueConstraint(source, idempotency_key)`.
+- **The real bug, found in this project and fixed in Phase 3.** HubSpot posts a **JSON array** of event objects, and **increments `attemptNumber` on every retry**. The original key was a hash of the raw body. So every retry of the same delivery hashed differently and was processed as a brand-new event — deduplication was not merely weak, it was completely defeated on the one sender that retries most. Two changes fixed it: key a batch on the **sorted set of member `eventId` values** (sorted because redelivery order is not guaranteed), and strip a `RETRY_VOLATILE_KEYS` set (`attemptNumber`, `attempt_number`, `attempt`, `retryCount`, `deliveryId`) before the fallback body hash, so the hash identifies the event rather than the attempt. `_event_id` also uses `is not None` rather than truthiness, because HubSpot event ids are integers and `0` is a valid one.
+- **It is asserted, not assumed.** `make golden-flow` step 16 posts the same HubSpot event twice with `attemptNumber: 0` then `attemptNumber: 3` and fails the run unless the second returns `duplicate: true`.
+- **Three security rules around the dedupe table**, each of which exists because the naive version is exploitable:
+  - An **unsigned or badly signed** delivery is rejected with `401` whatever has been seen before, and the stored event is left untouched. Otherwise knowing an event id would be enough to get a `200` out of the endpoint and to inflate another event's duplicate counter.
+  - A **rejected** delivery never counts as seen, so nobody can pre-empt a legitimate event by sending an unsigned copy of it first.
+  - A **failed** delivery that the sender retries is **processed again** rather than acked as a duplicate, since the sender's retry is exactly the right moment to try again.
+- **Dedupe also exists one layer down**, because the webhook layer is not the only entry point: engagements dedupe on `posthog:{event_id}`, signals on `UniqueConstraint(workspace_id, dedupe_key)` over `hash(type, domain, source_ref)`, workflow runs on `wf:{key}:v{version}:{trigger}:{event_id}` where the race loser takes an `IntegrityError` and is dropped, tasks on `task:{run}:{subject}`, notifications on `notify:{run}`.
+
+**Trade-offs.** Three of them. A **failed** event that exhausts `MAX_ATTEMPTS = 3` becomes `dead_letter` and only an operator replay revives it. One delivery is stored as **one row** even when the body is an array, which is correct for the current log-only HubSpot handler and wrong the moment a handler does per-event work — a partial failure fails the whole delivery. And processing is **inline**, inside the request, so a slow processor can exceed HubSpot's acknowledgment window; production should ack at the edge and queue the work.
+
+### 34. What happens if HubSpot is down?
+
+**Thesis.** Nothing is lost and nothing is duplicated, because the CRM is a *destination*, not a dependency. GTMOS's state is complete without it, every write is an upsert on a key GTMOS owns, and a failed sync is a row you can re-run.
+
+**Specifics.**
+- **Nothing upstream blocks.** Ingestion, matching, scoring, PQL evaluation, routing and approvals all run against Postgres. The CRM push is the last hop of a workflow, so a HubSpot outage degrades to "reps do not see today's scores in HubSpot", not "the system stops".
+- **Retry policy.** `RealHubSpotAdapter._post` retries 429 and 5xx up to 4 times, honours `Retry-After`, and otherwise backs off exponentially capped at 30s. Above that, `crm_sync` classifies each record result as retryable or permanent and retries only the retryable ones for `MAX_RETRY_ROUNDS = 3`. A permanent failure — a malformed property, say — is never retried, because retrying it only burns rate limit and delays the report.
+- **Re-running is safe.** Companies upsert on `gtmos_account_id` (`hasUniqueValue: true`), deals on `gtmos_opportunity_id`, contacts on `email`, in batches of `BATCH_LIMIT = 100`. Replaying a sync updates rather than creates. Records whose payload hash is unchanged are skipped before any call, so a re-run after a partial outage sends only what is genuinely outstanding.
+- **The outage is visible.** Every run writes an `integration_syncs` row with counts, per-record errors and a correlation id; the Stack Inspector's CRM section surfaces failure rate and time since the last successful sync, and Operations lists dead letters and failed runs. The *demo* stack currently shows 1.4% record failures over 7 days, which is the deliberately injected ~3% simulated 429 rate in `DemoHubSpotAdapter` after retries.
+- **Inbound is queued by the sender.** HubSpot retries its own webhook deliveries, and the idempotency key in Q33 means those retries are deduplicated when GTMOS comes back.
+- **If it is not an outage but a corruption**, the CRM-writes kill switch stops sync at the adapter boundary and returns `423 Locked` with the operator's reason (`services/governance.py`). It is read from the database on every action, because a cached flag would mean a pause takes effect whenever the cache happens to expire.
+
+**Trade-offs.** There is no circuit breaker: a long outage means every scheduled run burns its full retry budget before failing, which is wasted work and, on a shared quota, harmful to whatever else is calling HubSpot. There is no backlog queue either — a sync that fails is just a failed row; the next run picks the records up because their hash still differs, but nothing prioritises the oldest. The retry limiter is per-process, so several workers would each retry independently against one shared quota. None of this has been observed against a live portal, because `RealHubSpotAdapter` has never run against one.
+
+### 35. What happens if Clay returns conflicting values?
+
+**Thesis.** A contested field keeps its value and raises a data-quality issue. Confidence is a provider's opinion of itself, and letting the marginally more self-assured source overwrite a stored value is how a CRM fills up with confident nonsense.
+
+**Specifics.** Clay gets no special path — `services/clay_service.py` calls the same `domain/enrichment.py::decide` as any provider, then `detect_conflict` and `apply_conflict` (see also Q25).
+- **Manual locks always win.** A rep's correction beats Clay, whatever Clay says.
+- **Only differences worth acting on count.** Casing, legal suffixes, numbers within 15%, and one provider seeing more of a tech stack than another are not disagreement. A flag that fires on noise is a flag nobody reads.
+- **Materiality follows consequence, not confidence.** A dissent counts if the dissenting source is confident (≥ 0.6) **or** the numbers differ by more than 50% — a gap that size moves an account between segments and therefore changes scoring and routing, whatever the source thinks of itself.
+- **The outcome is one of four**, recorded per field as `set | updated | kept | conflicted`. On `conflict` the stored value stays, the rejected answer is recorded alongside it on `field_provenance` and shown under the field on the account page, and a data-quality issue is raised with a suggested fix. An **empty** field is still filled even when the delivery is contested — a value beats no value — and the row is created recording what is known, because refusing to write anything would hide the conflict forever.
+- **A partial row is not a failed row.** `empty`, `pending` and `errored` cells are skipped and the rest of the row lands. Most enrichment rows come back with only some fields filled, and treating that as failure discards good data.
+- *Demo:* 18 material conflicts, of which the Stack Inspector traces 8 to accounts where the rejected value would have changed the segment band or the ICP industry tier — meaning the owner and the grade were decided by a coin flip nobody saw.
+
+**Trade-offs.** This is all simulated-provider behaviour plus contract tests; **no Clay row has ever arrived**. Two specific unknowns make the Clay case weaker than the general one: Clay's waterfall provider name is documented as available per cell, but **per-cell confidence and timestamps are not documented at all and may simply not exist** (`docs/clay-live-setup.md` §9). If they do not, every Clay value arrives at one default confidence, and the ≥ 0.10 rule degenerates — Clay could never update an existing value, or could always update it, depending on where that default sits. The production answer is survivorship rules per field producing a golden record, with a stated precedence order per field rather than a generic confidence comparison.
+
+### 36. Why use reverse ETL at all?
+
+**Thesis.** Because the number is computed where the data is complete and consumed where the people are, and those are different systems. Reverse ETL is the named, testable contract for that hop: a model, a primary key, a match key, a sync mode and change detection. (Q8 defines it; this is why you would run one.)
+
+**Specifics.**
+- **The alternative is worse.** A score that lives only in a dashboard is a score nobody acts on. A rep will not open a second tool to check a grade before dialling. Putting `gtmos_score_grade` in a HubSpot property means reps filter lists on it, build views on it and see it on the record — which is also why Q22's buy-in answer starts here.
+- **Nor can you compute it in the CRM.** The inputs — decayed signals from three sources, enrichment provenance, product events with account resolution — are not in HubSpot, and HubSpot's calculated properties cannot express `confidence × relative strength × 0.5^(age/half-life)` with category caps and versioned weights, let alone unit-test it.
+- **The contract is what makes it safe** (`services/crm_sync.py`): the model is `computed_properties(account)`; the primary key is `gtmos_account_id`; the match key is the same, which is why it must be a unique property; the sync mode is upsert-on-change; change detection is `payload_hash` against `ExternalRecord.last_payload_hash`. `preview_reverse_etl` is a dry run that shows which records would be created or updated and which fields would change, without calling HubSpot at all.
+- **Where it sits in the stack.** n8n template 03 asks for the diff hourly and runs the sync only if something changed, so an idle hour makes no sync and writes no sync log row. The schedule belongs to n8n; the diffing, keying, batching and retry belong to GTMOS.
+- **Status.** All demo syncs are SIMULATED via `DemoHubSpotAdapter` into a `simulated_crm_objects` table.
+
+**Trade-offs.** At a company that already has Snowflake and dbt, do not build this: put the scoring output in a dbt model and let **Hightouch** or **Census (now Fivetran Activations)** sync it. They give you mirror and delete modes, scheduling, dozens of destinations, alerting and sync logs for free. GTMOS shows the contract, not a replacement for those products. Reverse ETL also inherits the warehouse's freshness — a nightly model means a nightly score, which is fine for fit and wrong for intent, so the product events that drive intent stay on the webhook path rather than the batch one.
+
+### 37. How would this work with Salesforce instead of HubSpot?
+
+**Thesis.** One adapter changes and nothing else does. The boundary is `CrmAdapter`, a two-method Protocol, and everything above it is already object-agnostic — but the Lead object is a genuine modelling problem, not a mapping exercise.
+
+**Specifics.**
+- **The seam already exists.** `integrations/hubspot.py::CrmAdapter` is a `Protocol` with `upsert(object_type, records) -> BatchOutcome` and `associate(from_type, to_type, pairs) -> BatchOutcome`. Two implementations exist behind it (`DemoHubSpotAdapter`, `RealHubSpotAdapter`) and `crm_sync.get_adapter` picks one from configuration. A `SalesforceAdapter` is a third.
+- **Identity carries over unchanged.** `ExternalRecord` is an identity map keyed (internal id, provider, object type, external id) with the last payload hash. It is already provider-scoped, so Salesforce ids and HubSpot ids can coexist during a migration.
+- **What maps cleanly.** HubSpot Company → Salesforce Account; Contact → Contact; Deal → Opportunity. The upsert key stops being a "unique property" and becomes an **External ID** field (`GTMOS_Account_ID__c`), which is if anything a better fit — Salesforce's `PATCH /sobjects/Account/GTMOS_Account_ID__c/{value}` is a first-class upsert, and Salesforce allows more external-id fields than HubSpot's ten unique properties. Associations become lookup relationships written on the child record rather than a separate association call, so `associate` collapses into `upsert` for most cases.
+- **What does not map: the Lead.** Salesforce has a Lead object with **no foreign key to an Account**, so lead-to-account matching is fuzzy by construction and fails silently — a mis-matched lead routes a VP at a target account into an SDR queue while the named AE never hears about it. That is the premise `domain/matching.py` is written on, and its waterfall is precision-first with ambiguity returned as an explicit non-answer. GTMOS's model is account-first, so the real decision is a policy one: do you write PQLs as Leads and let conversion create the Account, or skip Leads entirely and write Contacts under an existing Account? I would skip Leads where the Account already exists, which is exactly the case a product-led signal describes.
+- **What gets harder.** Salesforce's governor limits and API call ceilings are per-org and stricter than HubSpot's per-10-seconds window, so the shared token bucket in Q14's trade-offs becomes mandatory rather than aspirational. Its Composite and Bulk APIs replace the batch endpoints, with different partial-failure semantics — `allOrNone` is a real choice per request, and `false` gives you HubSpot-like per-record outcomes. Inbound change capture is Platform Events, CDC or Outbound Messages rather than a webhook subscription, with a different signature story.
+- **What stays identical.** Everything in `domain/*.py`. Scoring, routing, PQL, matching, committee, guardrails, experiments and attribution have no CRM dependency at all.
+
+**Trade-offs.** GTMOS has not done this: there is no Salesforce adapter, no sandbox, and the HubSpot adapter itself has never run live, so "one adapter changes" is an architectural claim supported by the Protocol's shape and by the demo/real pair already existing behind it — not by having done it twice. The honest risk is that field-level permissions, validation rules and required fields in a mature Salesforce org reject writes in ways HubSpot does not, and that surfaces as per-record permanent errors the sync will correctly refuse to retry and a human has to read.
+
+### 38. What would you change at $1M ARR versus $100M ARR?
+
+**Thesis.** The ownership boundary survives both; the plumbing does not. At $1M the scarce resource is the operator's attention, so buy more and automate less. At $100M the scarce resource is correctness under concurrency, so the pieces that were one process become services with owners.
+
+**Specifics.**
+
+| | ~$1M ARR | ~$100M ARR |
+|---|---|---|
+| Shape | This architecture minus the warehouse. One person operates it | PostHog events land in a warehouse through a pipeline or batch export, not a webhook; dbt models compute scores; Hightouch activates them |
+| Enrichment | Clay, configured by hand, a few hundred rows a month | Direct vendor contracts plus a golden-record service; Clay becomes the prototyping layer |
+| Scoring | Hand-set weights you can argue with. There is nothing to learn from yet on a new territory | An actual model trained on the labelled outcomes that finally exist, with the rules kept as the explanation layer. `docs/scoring-evaluation.md`'s harness is already model-agnostic — it takes (score, outcome) pairs |
+| Routing | Territory rules and a fallback queue | Working hours, PTO, escalation on SLA breach, capacity by segment |
+| CRM | HubSpot | Often Salesforce, and per Q37 the adapter boundary is the only thing that changes |
+| Execution | Inline processing, `queue_backend=inline` or a single RQ worker | Webhooks acked at the edge onto SQS or Kafka; workflows on Temporal with per-action concurrency limits; a shared Redis token bucket for CRM quota |
+| Data | 2,006 accounts and 11,819 contacts fit in Postgres (*demo*, current seed) | Events and activities in Snowflake or BigQuery; Postgres keeps operational state only |
+| Auth | Single operator identity and an admin token (`api/deps.py`) | SSO, RBAC, per-team scoping |
+| What matters most | **The kill switch matters more than the analytics.** One person cannot watch everything, so the ability to stop it is worth more than the ability to measure it | Observability and on-call. GTMOS becomes a service with a rota, and the attribution and experiment machinery finally has the volume to be worth running |
+
+**Trade-offs.** The genuinely hard call is scoring. At $1M there is a real temptation to fit a model on 40 closed-won deals, and it will look excellent in-sample and be worthless — the honest number in `docs/scoring-evaluation.md` already includes 0.5 on 2,006 synthetic accounts. At $100M the opposite temptation appears: replace the rules entirely with the model, at which point nobody can answer a rep asking why an account dropped a grade, and the score loses the only property that made reps use it. Keep the rules as the explanation layer in both worlds. The other thing I would resist at both ends is adding tools: the failure mode of a GTM stack is not too little software.

@@ -170,12 +170,20 @@ def test_webhook_signature_required_when_secret_configured(client, flagship, mon
         get_settings.cache_clear()
 
 
-def test_invalid_webhook_payload_is_recorded_as_failed_and_replayable(client, db):
+def test_a_payload_that_can_never_parse_is_rejected_rather_than_queued_for_retry(client, db):
+    """A schema violation is permanent, so the sender is told to stop rather than to try again.
+
+    This used to answer 202 ("accepted, will retry"), which makes a well-behaved sender redeliver a body
+    that is structurally wrong — HubSpot retries ten times over 24 hours on a non-2xx. The delivery is
+    still stored so an operator can see what arrived; it is simply not offered for replay, because
+    replaying it unchanged could never succeed.
+    """
     r = client.post("/api/v1/webhooks/posthog", json={"uuid": "bad-1", "properties": {}})
-    assert r.status_code == 202
-    assert r.json()["status"] == "failed"
-    replay = client.post(f"/api/v1/webhooks/events/{r.json()['id']}/replay").json()
-    assert replay["attempts"] == 2 and replay["status"] == "failed"
+    assert r.status_code == 422
+    assert r.json()["status"] == "rejected"
+    assert "invalid PostHog payload" in r.json()["error"]
+    replay = client.post(f"/api/v1/webhooks/events/{r.json()['id']}/replay")
+    assert replay.status_code >= 400, "a rejected delivery must not be replayable"
 
 
 def test_reverse_etl_is_idempotent(db, ws):

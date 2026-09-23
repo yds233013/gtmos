@@ -661,6 +661,33 @@ def ops_summary(db: Session = Depends(db_session), ws: Workspace = Depends(works
     return operations.summary(db, ws.id)
 
 
+@router.get("/integrations/status")
+def integration_status(
+    days: int = Query(7, ge=1, le=365), db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
+) -> dict[str, Any]:
+    """Per-integration mode, health and — the part that matters — verification level.
+
+    Deliberately separate from `GET /integrations`, which lists the registry rows. This answers a
+    different question: for each boundary, what does the running configuration actually do, and how much
+    of it has ever genuinely happened? No secret value is returned; requirements report presence only.
+    """
+    return operations.integration_status(db, ws.id, days)
+
+
+@router.get("/integrations/{provider}/activity")
+def integration_activity(
+    provider: str,
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(25, ge=1, le=200),
+    db: Session = Depends(db_session),
+    ws: Workspace = Depends(workspace),
+) -> dict[str, Any]:
+    """The records behind one integration card: inbound deliveries, sync runs and errors."""
+    if provider not in operations.BOUNDARIES_BY_PROVIDER:
+        raise HTTPException(404, f"no observability boundary for '{provider}'")
+    return operations.integration_activity(db, ws.id, provider, days, limit)
+
+
 @router.get("/audit")
 def audit_log(
     entity_type: str | None = None,
