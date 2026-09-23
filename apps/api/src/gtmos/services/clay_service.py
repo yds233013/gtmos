@@ -21,9 +21,9 @@ overwrites a manual lock, and a material disagreement with an existing confident
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
-import dataclasses
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -196,7 +196,8 @@ def _coerce(spec: FieldSpec, raw: Any) -> tuple[Any, str | None]:
             for i in items
             if (i.get("name") if isinstance(i, dict) else i) not in (None, "")
         ]
-        return ([v for v in out if v] or None), "empty"
+        cleaned = [v for v in out if v]
+        return (cleaned, None) if cleaned else (None, "empty")
     if isinstance(raw, str) and not raw.strip():
         return None, "empty"
     if spec.kind in ("int", "float", "fraction"):
@@ -289,6 +290,13 @@ IDENTITY_KEYS = {
     "clay_run_id": ("run_id", "routine_run_id", "clay_run"),
     "clay_table_id": ("table_id", "clay_table"),
 }
+# Envelope keys carry the delivery, not the record. They are not "unmapped columns" — reporting them
+# as such would bury the one column whose name the operator actually got wrong.
+ENVELOPE_KEYS = frozenset(
+    {"observed_at", "created_at", "createdat", "webhookid", "webhook_id", "data", "account", "contact"}
+    | set(IDENTITY_KEYS)
+    | {a for aliases in IDENTITY_KEYS.values() for a in aliases}
+)
 
 
 def parse_row(payload: Any) -> ClayRow:
@@ -320,9 +328,15 @@ def parse_row(payload: Any) -> ClayRow:
             for k, v in flat.items()
             if _strip_contact_prefix(k) in CONTACT_INDEX and k not in ACCOUNT_INDEX
         }
+        flat_unmapped = [
+            k
+            for k in flat
+            if k not in ACCOUNT_INDEX and _strip_contact_prefix(k) not in CONTACT_INDEX and k not in ENVELOPE_KEYS
+        ]
     else:
         account_raw = {_normalize_key(k): v for k, v in (nested_account or {}).items()}
         contact_raw = {_normalize_key(k): v for k, v in (nested_contact or {}).items()}
+        flat_unmapped = []
 
     account_cells, account_skipped, account_unmapped = _cells(
         account_raw, ACCOUNT_INDEX, ACCOUNT_FIELDS, envelope_observed, "account"
@@ -338,7 +352,7 @@ def parse_row(payload: Any) -> ClayRow:
         account=account_cells,
         contact=contact_cells,
         skipped=account_skipped + contact_skipped,
-        unmapped=sorted(set(account_unmapped) | set(contact_unmapped)),
+        unmapped=sorted(set(account_unmapped) | set(contact_unmapped) | set(flat_unmapped)),
         routine_run_id=routine_run_id,
     )
 

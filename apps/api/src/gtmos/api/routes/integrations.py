@@ -105,12 +105,8 @@ def reverse_etl_run(db: Session = Depends(db_session), ws: Workspace = Depends(w
     return row(sync, exclude=("workspace_id",))
 
 
-@router.post(
-    "/integrations/hubspot/reverse-etl/contacts-deals", dependencies=[Depends(require_admin_for_live_writes)]
-)
-def reverse_etl_contacts_deals(
-    db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
-) -> dict[str, Any]:
+@router.post("/integrations/hubspot/reverse-etl/contacts-deals", dependencies=[Depends(require_admin_for_live_writes)])
+def reverse_etl_contacts_deals(db: Session = Depends(db_session), ws: Workspace = Depends(workspace)) -> dict[str, Any]:
     """Push contacts and deals for accounts already in the CRM, then associate them to their company.
 
     Deliberately a separate call from the company sync: an association needs both records to exist, so
