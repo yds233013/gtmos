@@ -1,23 +1,62 @@
 {{ config(materialized = 'table') }}
 
--- Campaign performance by ISO week. Activity metrics are counted in the week the activity happened;
--- opportunity metrics are counted in the week the opportunity was opened and attributed with the
--- opportunity's own `source_campaign_id` (single-touch source attribution). The multi-touch models
--- live in the API's attribution service and are deliberately not duplicated here.
+-- Campaign performance by ISO week. Opportunity metrics are counted in the week the opportunity was
+-- opened and attributed with the opportunity's own `source_campaign_id` (single-touch source
+-- attribution). The multi-touch models live in the API's attribution service and are deliberately not
+-- duplicated here.
+--
+-- Delivery events (delivered, bounced, opened) are counted in the week of the **send they belong to**,
+-- not the week they themselves occurred. A send at 23:59 on a Sunday is delivered ninety seconds later
+-- in the following ISO week, which made a week show more deliveries than sends — a real reporting bug
+-- rather than a real delivery. The send is identified by (contact, sequence step), the same key an ESP
+-- uses to thread its own events.
 --
 -- Opens are carried for completeness but no rate is derived from them: Apple Mail Privacy Protection
 -- and image proxies make open tracking unreliable.
 
-with activities as (
+with raw_activities as (
 
     select
         workspace_id,
         campaign_id,
         account_id,
+        contact_id,
+        sequence_step_id,
         activity_type,
         occurred_week
     from {{ ref('stg_activities') }}
     where campaign_id is not null
+
+),
+
+-- The week each send happened, keyed the way an ESP threads its own delivery events.
+send_week as (
+
+    select
+        contact_id,
+        sequence_step_id,
+        min(occurred_week) as send_week
+    from raw_activities
+    where activity_type = 'email_sent'
+      and contact_id is not null
+      and sequence_step_id is not null
+    group by 1, 2
+
+),
+
+activities as (
+
+    select
+        a.workspace_id,
+        a.campaign_id,
+        a.account_id,
+        a.activity_type,
+        coalesce(s.send_week, a.occurred_week) as occurred_week
+    from raw_activities a
+    left join send_week s
+        on a.contact_id = s.contact_id
+       and a.sequence_step_id = s.sequence_step_id
+       and a.activity_type in ('email_delivered', 'email_bounced', 'email_opened')
 
 ),
 

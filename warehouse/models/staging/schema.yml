@@ -191,7 +191,20 @@ models:
                 to: ref('stg_experiment_assignments')
                 field: assignment_id
       - name: metric
+        description: >
+          Success metrics and guardrails share this column. Guardrails are evaluated for harm rather
+          than for lift, so a mart that sums them alongside replies would be wrong.
         tests:
           - accepted_values:
               arguments:
-                values: [reply, positive_reply, meeting, opportunity]
+                values:
+                  [
+                    reply,
+                    positive_reply,
+                    meeting,
+                    opportunity,
+                    bounce,
+                    unsubscribe,
+                    spam_complaint,
+                    negative_reply,
+                  ]

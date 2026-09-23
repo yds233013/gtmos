@@ -8,7 +8,7 @@ API_PORT ?= 8010
 WEB_PORT ?= 3010
 
 .PHONY: help setup dev-deps migrate seed reset backtest llm-eval api worker web dev up down logs n8n \
-        warehouse warehouse-docs \
+        warehouse warehouse-refresh warehouse-docs \
         test test-api test-unit test-web e2e lint typecheck format check clean
 
 help: ## Show available targets
@@ -63,6 +63,9 @@ n8n: ## Start optional local n8n on :5678 to import integrations/n8n templates
 
 warehouse: ## Build and test the dbt analytics marts into schema `analytics` (needs `make seed`)
 	cd $(API) && uv run dbt build $(DBT_FLAGS)
+
+warehouse-refresh: ## Rebuild the marts from scratch (required after `make reset`: the source ids change)
+	cd $(API) && uv run dbt build --full-refresh $(DBT_FLAGS)
 
 warehouse-docs: ## Generate the dbt docs site (serve with `dbt docs serve` from warehouse/)
 	cd $(API) && uv run dbt docs generate $(DBT_FLAGS)

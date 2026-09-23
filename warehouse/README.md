@@ -17,8 +17,14 @@ dev dependency of the API project, so no separate install is needed.
 
 ```bash
 make warehouse         # dbt build: runs every model, then every test
+make warehouse-refresh # --full-refresh: required after `make reset`
 make warehouse-docs    # dbt docs generate
 ```
+
+**After `make reset`, use `make warehouse-refresh`.** Reseeding rebuilds the operational tables with
+new ids, so the incremental model still holds rows whose source records no longer exist and its
+relationship test fails. That is the correct behaviour, not a bug: a truncate-and-reload upstream is
+exactly the case where an incremental model must be rebuilt, and the test is what tells you.
 
 Or directly:
 
@@ -125,7 +131,13 @@ uses. Use this table for trend and cohort-maturity questions, and the snapshot f
 
 ### `fct_outbound_performance`
 
-Activity metrics sit in the week the activity happened; opportunity metrics sit in the week the
+**Delivery events are attributed to the week of their send**, not the week they occurred. A send at
+23:59 on a Sunday is delivered ninety seconds later in the next ISO week, which made that week report
+more deliveries than sends and tripped `assert_outbound_delivery_within_sends`. The send is identified
+by `(contact_id, sequence_step_id)` — the same key an ESP uses to thread its own events — and the
+singular test is what caught it, which is the argument for writing business-rule tests at all.
+
+Other activity metrics sit in the week the activity happened; opportunity metrics sit in the week the
 opportunity opened, attributed by the opportunity's own `source_campaign_id` — single-touch source
 attribution. The multi-touch models (first touch, last touch, linear, U-shaped) stay in the API's
 attribution service; duplicating them here would give the organisation two attribution answers.
