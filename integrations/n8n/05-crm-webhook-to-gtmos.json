@@ -1,0 +1,125 @@
+{
+  "id": "GTMOScrmDedupe01",
+  "name": "GTMOS · HubSpot CRM events → GTMOS (deduplicated)",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000000",
+      "name": "What this is",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-460, -280],
+      "parameters": {
+        "width": 600,
+        "height": 260,
+        "content": "## CRM events → GTMOS, deduplicated\nReceives a HubSpot-shaped batch (a JSON **array** of change events), normalises it and forwards it to GTMOS's `/api/v1/webhooks/hubspot`.\n\nThe point is the redelivery behaviour. HubSpot retries a batch with the **same `eventId`s and a higher `attemptNumber`**, so anything that keys on the raw body counts every retry as a new event. GTMOS keys on the sorted member event ids and strips `attemptNumber` before hashing, so this workflow forwards the batch untouched — including `attemptNumber` — and the second delivery comes back `duplicate: true` with `duplicate_count` incremented.\n\nThe webhook responds with GTMOS's verdict (`responseMode: lastNode`), so `curl` shows the dedupe result directly."
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000001",
+      "name": "HubSpot events webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "gtmos-crm-events",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gtmos-crm-events",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000002",
+      "name": "Normalise HubSpot batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Normalise one HubSpot delivery. The batch stays a batch: GTMOS's idempotency key for an array payload\n// is `hubspot:batch:<sorted member eventIds>`, so splitting it into items here would destroy the very\n// dedupe this workflow exists to demonstrate.\nconst first = $input.first().json;\nconst raw = Array.isArray(first.body) ? first.body : (Array.isArray(first) ? first : [first.body ?? first]);\nif (!Array.isArray(raw) || raw.length === 0) {\n  throw new Error('expected a non-empty JSON array of HubSpot change events');\n}\nconst WANTED = new Set([\n  'company.creation', 'company.deletion', 'company.propertyChange',\n  'contact.creation', 'contact.deletion', 'contact.propertyChange',\n  'deal.creation', 'deal.deletion', 'deal.propertyChange'\n]);\nconst events = raw\n  .filter((e) => e && typeof e === 'object')\n  // `eventId` is the dedupe anchor. An event without one would silently push the whole batch onto the\n  // body-hash fallback, so it is dropped rather than allowed to poison the key.\n  .filter((e) => e.eventId !== undefined && e.eventId !== null && String(e.eventId) !== '')\n  .filter((e) => !e.subscriptionType || WANTED.has(e.subscriptionType))\n  .map((e) => ({\n    eventId: e.eventId,\n    subscriptionType: e.subscriptionType ?? 'company.propertyChange',\n    objectId: e.objectId ?? null,\n    propertyName: e.propertyName ?? null,\n    propertyValue: e.propertyValue ?? null,\n    occurredAt: e.occurredAt ?? null,\n    portalId: e.portalId ?? null,\n    changeSource: e.changeSource ?? null,\n    // Forwarded on purpose. It is the field that differs between attempts, and GTMOS strips it before\n    // hashing — passing it through is what makes the dedupe test honest rather than staged.\n    attemptNumber: e.attemptNumber ?? 0\n  }));\nif (events.length === 0) {\n  throw new Error('no usable HubSpot events in payload (need objects carrying eventId)');\n}\nconst eventIds = events.map((e) => String(e.eventId));\ntry {\n  $execution.customData.set('gtmos_hubspot_event_ids', eventIds.join(',').slice(0, 250));\n  $execution.customData.set('gtmos_hubspot_attempt', String(events[0].attemptNumber));\n} catch (e) { /* telemetry must not break ingestion */ }\nreturn [{ json: { events, batch_size: events.length, event_ids: eventIds, dropped: raw.length - events.length } }];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000003",
+      "name": "Prepare signed delivery",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// GTMOS verifies inbound CRM webhooks with HubSpot's own v3 scheme:\n//   base64(HMAC-SHA256(client_secret, METHOD + uri + rawBody + timestamp_ms))\n// It signs the *raw body bytes* and the URI exactly as received, so the body string built here is the\n// one the HTTP node sends verbatim (contentType: raw) — re-serialising it downstream would break the MAC.\n// With no client secret configured, GTMOS reports signature_status `not_configured` and accepts the\n// delivery in development; this node then sends empty signature headers rather than a forged one.\nconst crypto = require('crypto');\nconst url = ($env.GTMOS_BASE_URL ?? '') + '/api/v1/webhooks/hubspot';\nconst body = JSON.stringify($input.first().json.events);\nconst ts = Date.now().toString();\nconst secret = $env.HUBSPOT_WEBHOOK_CLIENT_SECRET ?? '';\nconst sig = secret\n  ? crypto.createHmac('sha256', secret).update('POST' + url + body + ts).digest('base64')\n  : '';\nreturn [{ json: { url, body, ts, sig, signed: Boolean(secret) } }];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000004",
+      "name": "Forward batch to GTMOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-HubSpot-Request-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-HubSpot-Signature-v3", "value": "={{ $json.sig }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 20000,
+          "response": { "response": { "fullResponse": true } }
+        }
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000005",
+      "name": "Report dedupe outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, -120],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const res = $input.first().json;\nconst b = res.body ?? {};\nconst batch = $('Normalise HubSpot batch').first().json;\nconst out = {\n  forwarded: batch.batch_size,\n  dropped: batch.dropped,\n  event_ids: batch.event_ids,\n  attempt_number: batch.events[0].attemptNumber,\n  http_status: res.statusCode ?? null,\n  gtmos_event_id: b.id ?? null,\n  status: b.status ?? null,\n  duplicate: b.duplicate === true,\n  signature: b.signature ?? null,\n  correlation_id: b.correlation_id ?? null,\n  error: b.error ?? null\n};\ntry { $execution.customData.set('gtmos_duplicate', String(out.duplicate)); } catch (e) { /* noop */ }\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0005-4c3e-9a10-000000000006",
+      "name": "Ingestion failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [980, 140],
+      "parameters": {
+        "errorMessage": "=GTMOS did not accept the CRM batch after retries: {{ JSON.stringify($json.error ?? $json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "HubSpot events webhook": { "main": [[{ "node": "Normalise HubSpot batch", "type": "main", "index": 0 }]] },
+    "Normalise HubSpot batch": { "main": [[{ "node": "Prepare signed delivery", "type": "main", "index": 0 }]] },
+    "Prepare signed delivery": { "main": [[{ "node": "Forward batch to GTMOS", "type": "main", "index": 0 }]] },
+    "Forward batch to GTMOS": {
+      "main": [
+        [{ "node": "Report dedupe outcome", "type": "main", "index": 0 }],
+        [{ "node": "Ingestion failed", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "GTMOSerrHandler1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "active": false
+}

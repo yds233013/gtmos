@@ -1,4 +1,5 @@
 {
+  "id": "ddeUXj02dyHboALn",
   "name": "GTMOS \u00b7 HubSpot company change \u2192 GTMOS rescore",
   "nodes": [
     {
@@ -134,7 +135,8 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "GTMOSerrHandler1"
   },
   "active": false
 }

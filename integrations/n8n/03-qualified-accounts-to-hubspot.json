@@ -1,6 +1,19 @@
 {
+  "id": "V9xOZgZVTpaEDMPD",
   "name": "GTMOS · Hourly: A-grade accounts → HubSpot (via GTMOS reverse ETL)",
   "nodes": [
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000000",
+      "name": "What this is",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-420, -260],
+      "parameters": {
+        "width": 560,
+        "height": 240,
+        "content": "## High-intent accounts → CRM\nHourly: ask GTMOS what the reverse-ETL diff *would* do, and only run the sync when something actually changed — a no-op sync every hour is how CRM audit logs become unreadable.\n\nn8n never touches HubSpot. GTMOS owns the CRM boundary (field mapping, `gtmos_*` ownership, simulated vs live mode), so this schedules GTMOS's own job rather than re-implementing it here.\n\nThe outcome of every run is written back to GTMOS as a signed operational record, and a run with failed records ends in **Stop And Error** so the error handler picks it up."
+      }
+    },
     {
       "id": "5b1f7a2e-0003-4c3e-9a10-000000000001",
       "name": "Every hour",
@@ -10,15 +23,28 @@
       "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] } }
     },
     {
+      "id": "5b1f7a2e-0003-4c3e-9a10-00000000000d",
+      "name": "Run now (manual / sub-workflow)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "parameters": {},
+      "notes": "Lets an operator force a sync out of band: `n8n execute --id=V9xOZgZVTpaEDMPD`. The Server CLI refuses to run a workflow whose only trigger is a Schedule Trigger."
+    },
+    {
       "id": "5b1f7a2e-0003-4c3e-9a10-000000000002",
       "name": "Preview reverse-ETL diff",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [240, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "stopWorkflow",
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/integrations/hubspot/reverse-etl/preview?limit=5",
-        "options": {}
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/integrations/hubspot/reverse-etl/preview?limit=25",
+        "options": { "timeout": 15000 }
       }
     },
     {
@@ -48,30 +74,103 @@
       "name": "Run reverse-ETL sync",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, -80],
+      "position": [760, -120],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
         "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/integrations/hubspot/reverse-etl/run",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.GTMOS_ADMIN_TOKEN }}" }]
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.GTMOS_ADMIN_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
         },
-        "options": {}
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "fullResponse": true } }
+        }
       }
     },
     {
       "id": "5b1f7a2e-0003-4c3e-9a10-000000000005",
-      "name": "Alert on failed records",
+      "name": "Nothing to sync",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [760, 120],
+      "alwaysOutputData": true,
+      "parameters": {}
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000006",
+      "name": "Build run record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Two inbound paths land here: the sync response (wrapped by fullResponse, so it has `.body`) and the\n// no-change branch (which carries the preview JSON straight through). `.body` is what tells them apart.\nconst src = $input.first().json;\nconst preview = $('Preview reverse-ETL diff').first().json;\nconst sync = src.body ?? null;\nconst ran = !!(sync && sync.job);\nconst record = {\n  // Empty list: this is an operational record, not GTM data. /api/v1/webhooks/n8n stores the whole body\n  // verbatim and hands `signals` to the signal processor, so [] records the run without inventing signals.\n  signals: [],\n  // Dedupe key. A sync row id is unique per run; a no-op is keyed to the minute so a burst of no-op runs\n  // does not create a row per attempt.\n  event_id: 'n8n-reverse-etl:' + (ran ? sync.id : 'noop:' + new Date().toISOString().slice(0, 16)),\n  record_type: 'reverse_etl_run',\n  recorded_by: 'n8n:03-qualified-accounts-to-hubspot',\n  recorded_at: new Date().toISOString(),\n  n8n_execution_id: $execution.id,\n  ran_sync: ran,\n  http_status: src.statusCode ?? null,\n  preview: {\n    considered: preview.considered,\n    would_create: preview.would_create,\n    would_update: preview.would_update,\n    unchanged: preview.unchanged,\n    changed_field_counts: preview.changed_field_counts\n  },\n  sync: ran ? {\n    id: sync.id,\n    job: sync.job,\n    status: sync.status,\n    is_simulated: sync.is_simulated,\n    records_considered: sync.records_considered,\n    records_changed: sync.records_changed,\n    records_succeeded: sync.records_succeeded,\n    records_failed: sync.records_failed,\n    records_skipped: sync.records_skipped,\n    duration_ms: sync.duration_ms,\n    errors: (sync.errors ?? []).slice(0, 10)\n  } : null\n};\ntry {\n  $execution.customData.set('gtmos_reverse_etl', ran ? String(sync.status) : 'no_change');\n  $execution.customData.set('gtmos_records_changed', String(ran ? sync.records_changed : 0));\n} catch (e) { /* telemetry must not break the run */ }\nreturn [{ json: record }];"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000007",
+      "name": "Sign request (HMAC-SHA256)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1260, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// X-GTMOS-Signature = sha256=HMAC(secret, `${timestamp}.${rawBody}`); GTMOS rejects >5 min skew.\nconst crypto = require('crypto');\nconst secret = $env.GTMOS_WEBHOOK_SECRET;\nreturn $input.all().map((item) => {\n  const body = JSON.stringify(item.json);\n  const ts = Math.floor(Date.now() / 1000).toString();\n  const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(ts + '.' + body).digest('hex');\n  return { json: { body, ts, sig } };\n});"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000008",
+      "name": "Log outcome to GTMOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/webhooks/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-GTMOS-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-GTMOS-Signature", "value": "={{ $json.sig }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": { "response": { "fullResponse": true } }
+        }
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-000000000009",
+      "name": "Any records failed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [960, -80],
+      "position": [1740, 0],
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
           "conditions": [
             {
               "id": "c2",
-              "leftValue": "={{ $json.records_failed }}",
+              "leftValue": "={{ $('Build run record').first().json.sync ? $('Build run record').first().json.sync.records_failed : 0 }}",
               "rightValue": 0,
               "operator": { "type": "number", "operation": "gt" }
             }
@@ -80,14 +179,69 @@
         },
         "options": {}
       }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-00000000000a",
+      "name": "Fail the run (partial sync)",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1980, -120],
+      "parameters": {
+        "errorMessage": "=Reverse-ETL sync finished with {{ $('Build run record').first().json.sync.records_failed }} failed record(s); sync id {{ $('Build run record').first().json.sync.id }}"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-00000000000b",
+      "name": "Clean run",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1980, 120],
+      "alwaysOutputData": true,
+      "parameters": {}
+    },
+    {
+      "id": "5b1f7a2e-0003-4c3e-9a10-00000000000c",
+      "name": "Sync call failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1020, -300],
+      "parameters": {
+        "errorMessage": "=Reverse-ETL run endpoint did not succeed after retries: {{ JSON.stringify($json.error ?? $json) }}"
+      }
     }
   ],
   "connections": {
     "Every hour": { "main": [[{ "node": "Preview reverse-ETL diff", "type": "main", "index": 0 }]] },
+    "Run now (manual / sub-workflow)": { "main": [[{ "node": "Preview reverse-ETL diff", "type": "main", "index": 0 }]] },
     "Preview reverse-ETL diff": { "main": [[{ "node": "Anything changed?", "type": "main", "index": 0 }]] },
-    "Anything changed?": { "main": [[{ "node": "Run reverse-ETL sync", "type": "main", "index": 0 }], []] },
-    "Run reverse-ETL sync": { "main": [[{ "node": "Alert on failed records", "type": "main", "index": 0 }]] }
+    "Anything changed?": {
+      "main": [
+        [{ "node": "Run reverse-ETL sync", "type": "main", "index": 0 }],
+        [{ "node": "Nothing to sync", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run reverse-ETL sync": {
+      "main": [
+        [{ "node": "Build run record", "type": "main", "index": 0 }],
+        [{ "node": "Sync call failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Nothing to sync": { "main": [[{ "node": "Build run record", "type": "main", "index": 0 }]] },
+    "Build run record": { "main": [[{ "node": "Sign request (HMAC-SHA256)", "type": "main", "index": 0 }]] },
+    "Sign request (HMAC-SHA256)": { "main": [[{ "node": "Log outcome to GTMOS", "type": "main", "index": 0 }]] },
+    "Log outcome to GTMOS": { "main": [[{ "node": "Any records failed?", "type": "main", "index": 0 }]] },
+    "Any records failed?": {
+      "main": [
+        [{ "node": "Fail the run (partial sync)", "type": "main", "index": 0 }],
+        [{ "node": "Clean run", "type": "main", "index": 0 }]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "GTMOSerrHandler1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
   "active": false
 }

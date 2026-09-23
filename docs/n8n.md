@@ -151,7 +151,9 @@ what makes the dedupe test honest rather than staged. Events without an `eventId
 allowed to push the whole batch onto the body-hash fallback.
 
 `responseMode: lastNode` means the caller gets GTMOS's verdict back, so `curl` shows `duplicate: true`
-directly.
+directly. A malformed delivery (not an array, or no event carrying an `eventId`) fails the workflow with
+HTTP 500 rather than being quietly accepted, which routes it to workflow 06 — so a broken sender shows up
+as an operational record instead of as silence.
 
 **Signature.** GTMOS verifies inbound CRM webhooks with HubSpot's v3 scheme,
 `base64(HMAC-SHA256(client_secret, METHOD + uri + rawBody + timestamp_ms))`. If
@@ -287,8 +289,10 @@ published and the container restarted. Firing the production webhook returned
 
 ### 01 and 02 — re-executed after the changes
 
-01: `POST /webhook/gtmos-signal-intake` → 200; GTMOS created signal
-`n8n-verify-20260922-a` and moved the account score. 02: `POST /webhook/gtmos-posthog` → 200; GTMOS event
+01: `POST /webhook/gtmos-signal-intake` → 200; GTMOS event `signature_status valid`, `status processed`,
+signal `174884c6-…` created for `kestrel-analytics.example` (`created: true`; the account's score was
+already at 99, so it did not move) and a downstream workflow run fired. That change is also what created
+the pending CRM diff used for the 03 sync test above. 02: `POST /webhook/gtmos-posthog` → 200; GTMOS event
 `n8n-verify-ph-20260922-a`, `signature_status valid`, `status processed`, `matched: 1`, signal
 `integration_activated` created.
 

@@ -1,4 +1,5 @@
 {
+  "id": "jV6yvWXpC6IaLuFl",
   "name": "GTMOS · External buying signal → GTMOS (signed)",
   "nodes": [
     {
@@ -67,6 +68,6 @@
     "Map to GTMOS signal": { "main": [[{ "node": "Sign request (HMAC-SHA256)", "type": "main", "index": 0 }]] },
     "Sign request (HMAC-SHA256)": { "main": [[{ "node": "POST to GTMOS", "type": "main", "index": 0 }]] }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "GTMOSerrHandler1" },
   "active": false
 }

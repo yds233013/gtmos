@@ -1,4 +1,5 @@
 {
+  "id": "VZMR72EYXwur2acN",
   "name": "GTMOS · PostHog product event → GTMOS",
   "nodes": [
     {
@@ -60,6 +61,6 @@
     "PostHog destination webhook": { "main": [[{ "node": "Keep GTM-relevant events", "type": "main", "index": 0 }]] },
     "Keep GTM-relevant events": { "main": [[{ "node": "Forward to GTMOS", "type": "main", "index": 0 }]] }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "GTMOSerrHandler1" },
   "active": false
 }

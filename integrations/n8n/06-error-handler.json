@@ -1,0 +1,103 @@
+{
+  "id": "GTMOSerrHandler1",
+  "name": "GTMOS · Error handler (records workflow failures)",
+  "nodes": [
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000000",
+      "name": "What this is",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-360, -200],
+      "parameters": {
+        "width": 520,
+        "height": 220,
+        "content": "## Error handler\nAttached as `settings.errorWorkflow` on the other GTMOS workflows. When one of them fails, this receives the Error Trigger payload and records a structured operational record in GTMOS (`/api/v1/webhooks/n8n`, HMAC-signed) so a failure is durable and queryable instead of living only in n8n's execution list.\n\nDeliberately notifies **nothing external** — no email, no Slack. The record is data, not an alert; GTMOS owns alerting. It also stamps `$execution.customData` so an operator can filter n8n executions by the failing workflow."
+      }
+    },
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000001",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "parameters": {}
+    },
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000002",
+      "name": "Build operational record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// The Error Trigger payload has two shapes: `execution{}` when a node failed mid-run, and `trigger{}`\n// when the failure was in the trigger itself (the workflow never executed, so there is no execution id).\n// Both are flattened into one record shape so the GTMOS side has a single thing to read.\n//\n// `signals: []` is load-bearing. /api/v1/webhooks/n8n stores the raw body verbatim and then hands\n// `payload.signals` to the signal processor; an empty list means the delivery is recorded as a\n// processed webhook event carrying this record, without inventing any GTM data.\nconst out = [];\nfor (const item of $input.all()) {\n  const p = item.json ?? {};\n  const wf = p.workflow ?? {};\n  const ex = p.execution ?? {};\n  const tr = p.trigger ?? {};\n  const err = ex.error ?? tr.error ?? {};\n  const executionId = ex.id ?? null;\n  const lastNode = ex.lastNodeExecuted ?? (err.node && err.node.name) ?? null;\n  out.push({ json: {\n    signals: [],\n    // GTMOS dedupes on `event_id`, so a redelivery of the same failure collapses instead of piling up.\n    event_id: 'n8n-error:' + (wf.id ?? 'unknown') + ':' + (executionId ?? 'trigger') + ':' + (lastNode ?? 'n-a'),\n    record_type: 'n8n_workflow_error',\n    recorded_by: 'n8n:06-error-handler',\n    recorded_at: new Date().toISOString(),\n    workflow_id: wf.id ?? null,\n    workflow_name: wf.name ?? null,\n    execution_id: executionId,\n    execution_url: ex.url ?? null,\n    execution_mode: ex.mode ?? tr.mode ?? null,\n    retry_of: ex.retryOf ?? null,\n    last_node_executed: lastNode,\n    error_name: err.name ?? null,\n    error_message: String(err.message ?? '').slice(0, 1000),\n    error_stack: String(err.stack ?? '').slice(0, 2000)\n  }});\n  // Second, independent channel: make the n8n execution itself findable by the workflow that broke.\n  // customData is Code-node only and is not available in every execution mode, hence the try/catch.\n  try {\n    $execution.customData.set('gtmos_failed_workflow', String(wf.name ?? wf.id ?? 'unknown').slice(0, 250));\n    $execution.customData.set('gtmos_failed_execution', String(executionId ?? 'n/a'));\n    $execution.customData.set('gtmos_failed_node', String(lastNode ?? 'n/a').slice(0, 250));\n  } catch (e) { /* recording the error must never fail because of telemetry */ }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000003",
+      "name": "Sign request (HMAC-SHA256)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// X-GTMOS-Signature = sha256=HMAC(secret, `${timestamp}.${rawBody}`); GTMOS rejects >5 min skew.\nconst crypto = require('crypto');\nconst secret = $env.GTMOS_WEBHOOK_SECRET;\nreturn $input.all().map((item) => {\n  const body = JSON.stringify(item.json);\n  const ts = Math.floor(Date.now() / 1000).toString();\n  const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(ts + '.' + body).digest('hex');\n  return { json: { body, ts, sig } };\n});"
+      }
+    },
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000004",
+      "name": "Record failure in GTMOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GTMOS_BASE_URL }}/api/v1/webhooks/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-GTMOS-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-GTMOS-Signature", "value": "={{ $json.sig }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": { "response": { "fullResponse": true } }
+        }
+      }
+    },
+    {
+      "id": "5b1f7a2e-0006-4c3e-9a10-000000000005",
+      "name": "Mirror to execution log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 0],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Last line of defence. If GTMOS was the thing that was down, the POST above returned nothing useful;\n// the record still has to survive somewhere an operator can read, so it goes to the execution log.\nconst results = [];\nconst records = $('Build operational record').all();\nfor (let i = 0; i < records.length; i++) {\n  const posted = $input.all()[i] ? $input.all()[i].json : {};\n  const status = posted.statusCode ?? null;\n  const stored = posted.body && posted.body.id ? posted.body.id : null;\n  const line = { gtmos_ops_record: records[i].json, delivery: { http_status: status, gtmos_event_id: stored, delivered: status === 200 || status === 202 } };\n  console.log('GTMOS_N8N_ERROR ' + JSON.stringify(line));\n  results.push({ json: line });\n}\nreturn results;"
+      }
+    }
+  ],
+  "connections": {
+    "On workflow error": { "main": [[{ "node": "Build operational record", "type": "main", "index": 0 }]] },
+    "Build operational record": { "main": [[{ "node": "Sign request (HMAC-SHA256)", "type": "main", "index": 0 }]] },
+    "Sign request (HMAC-SHA256)": { "main": [[{ "node": "Record failure in GTMOS", "type": "main", "index": 0 }]] },
+    "Record failure in GTMOS": { "main": [[{ "node": "Mirror to execution log", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "active": false
+}
