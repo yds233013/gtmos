@@ -56,9 +56,9 @@ The n8n templates use their own variables (`GTMOS_BASE_URL`, `GTMOS_WEBHOOK_SECR
 | Contact | `contacts` | `email` |
 | Opportunity | `deals` | `gtmos_opportunity_id` (custom, `hasUniqueValue: true`) |
 
-`GET /api/v1/integrations/hubspot/mapping` returns this mapping and the custom property definitions. Only **companies** are pushed today (reverse ETL and the `sync_crm` workflow action). Contact and deal property mappers (`contact_properties`, `deal_properties`, including a deal-stage map to HubSpot's default pipeline) exist but are not yet wired to a sync job.
+`GET /api/v1/integrations/hubspot/mapping` returns this mapping and the custom property definitions. Companies are pushed by reverse ETL and the `sync_crm` workflow action; contacts and deals are pushed by `run_contact_and_deal_sync`, which also writes the primary contact→company and deal→company associations.
 
-**Why not upsert companies on `domain`?** HubSpot documents `domain` as the company's primary identifier for dedupe, but does not enforce uniqueness on it, so batch upsert rejects it as an `idProperty` ("Unable to perform update/upsert by non-unique 0-2 property domain"). GTMOS creates its own unique property, `gtmos_account_id`, holding the GTMOS account UUID, and keys every write on it. Replaying a sync therefore cannot create a duplicate company.
+**Why not upsert companies on `domain`?** HubSpot documents `domain` as the company's primary identifier for dedupe, but does not enforce uniqueness on it, so it cannot serve as a batch-upsert `idProperty` at all — and HubSpot's docs state plainly that companies created through the API are not deduplicated on domain. GTMOS creates its own unique property, `gtmos_account_id`, holding the GTMOS account UUID, and keys every write on it. Replaying a sync therefore cannot create a duplicate company.
 
 Custom company properties written by GTMOS: `gtmos_account_id`, `gtmos_icp_score`, `gtmos_intent_score`, `gtmos_score_grade`, `gtmos_account_tier`, `gtmos_last_signal`, `gtmos_last_signal_at`, `gtmos_next_best_action`, `gtmos_industry`. Contacts: `gtmos_contact_id`, `gtmos_buying_role`. Deals: `gtmos_opportunity_id`.
 

@@ -375,6 +375,11 @@ models:
                     linkedin,
                     note,
                     call,
+                    # Internal-only, written by the product-qualified workflow. Neither is a touch:
+                    # every is_* flag below tests explicit membership, so both stay false and no
+                    # attribution, funnel or engagement measure counts them.
+                    task,
+                    notification,
                   ]
       - name: occurred_at
         description: When the event happened. The incremental high-water mark.

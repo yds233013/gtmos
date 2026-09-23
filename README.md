@@ -92,7 +92,7 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
   LLM-generated SQL, ever, and metrics GTMOS does not model (revenue, churn, NPS, CAC) are named as gaps
   instead of approximated by the nearest metric that shares a word.
 - **A warehouse layer.** A [dbt project](warehouse/) modelling the operational database into analytics marts,
-  with 19 models and 113 tests, checked against the API's semantic layer so the two cannot drift apart.
+  with 19 models and 132 tests, checked against the API's semantic layer so the two cannot drift apart.
 - **Evaluation for generated content.** `make llm-eval` grades whichever writer is configured against
   adversarial cases: invented citations, ungrounded numbers, banned superlatives, and instructions hidden in
   the evidence. It found a real one — untrusted feed text was being copied verbatim into research reports.
@@ -191,7 +191,7 @@ Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`
 |---|---|
 | **ICP** | Versioned, validated definition (industries, size bands, regions, technographics, personas, signal budgets, exclusions, weights); preview grade changes before saving |
 | **Enrichment** | Waterfall per field across providers with fallbacks, confidence thresholds, cost, provenance and merge policy |
-| **Signals** | 13 types across intent / timing / engagement, each with source, confidence, strength, evidence, dedupe key and half-life decay |
+| **Signals** | 19 types across fit / intent / timing / technical / engagement, six of them negative, each with source, confidence, strength, evidence, dedupe key and half-life decay |
 | **Scoring** | Explainable 100-point model; fit vs "why now" (intent index); A–D grades; exclusions |
 | **Routing** | Priority → specificity → key conflict resolution, ownership respect, inactive-owner reassignment, least-loaded pools with capacity |
 | **CRM** | Mini-CRM with funnel + deal stages, forward-only lifecycle, stage history, HubSpot object mapping |
@@ -282,8 +282,8 @@ make check          # everything above + production web build
 
 | Suite | Count | What it covers |
 |---|---|---|
-| Backend unit (pytest) | 132 | Scoring including disqualifying signals, the enrichment waterfall and its conflict policy, routing conflicts/round robin/SLAs, committee, experiment and attribution maths, evaluation statistics against hand-computed cases, the content-evaluation graders against a deliberately broken writer, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures |
-| Backend integration (pytest + Postgres) | 185 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating |
+| Backend unit (pytest) | 210 | Scoring including disqualifying signals, the enrichment waterfall and its conflict policy, routing conflicts/round robin/SLAs, committee, experiment and attribution maths, evaluation statistics against hand-computed cases, the content-evaluation graders against a deliberately broken writer, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures including HubSpot's v1/v2/v3 schemes, the product-qualified rule, integration status derivation |
+| Backend integration (pytest + Postgres) | 251 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating, Clay ingestion and its prompt-injection sanitisation, permanently-invalid payloads rejected rather than retried, integration observability |
 | Frontend (Vitest + Testing Library) | 14 | Formatters, safe markdown (HTML injection), URL helpers, accessible meters, confirm-before-mutate, inline API errors |
 | E2E (Playwright, production build) | 22 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
 

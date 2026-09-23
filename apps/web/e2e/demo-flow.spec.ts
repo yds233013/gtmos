@@ -59,8 +59,16 @@ test.describe("GTMOS demo flow", () => {
     await expect(page.getByText("Automation opportunities").first()).toBeVisible();
   });
 
+  test("integrations page states how far each boundary has actually been verified", async ({ page }) => {
+    await page.goto("/integrations");
+    await expect(page.getByRole("heading", { name: "Integrations", level: 1 })).toBeVisible();
+    // Only n8n has ever run against a real instance, and the page must keep saying so.
+    await expect(page.getByText("Real service never reached")).toHaveCount(3);
+    await expect(page.getByText("Connected", { exact: true })).toHaveCount(0);
+  });
+
   for (const path of ["/signals", "/contacts", "/pipeline", "/campaigns", "/experiments", "/workflows",
-    "/data-quality", "/operations", "/scoring", "/settings"]) {
+    "/data-quality", "/operations", "/scoring", "/settings", "/integrations", "/integrations/n8n"]) {
     test(`page ${path} renders without an error boundary`, async ({ page }) => {
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(e.message));

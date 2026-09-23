@@ -89,7 +89,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Thesis.** A signal is a timestamped, sourced, confidence-weighted fact tied to an account. Detection is ingestion plus resolution plus deduplication plus decay. The source matters less than that pipeline.
 
 **Specifics.**
-- **Catalog.** 19 types (`domain/signals.py`), six of them disqualifying across first-party (product events, pricing visits), third-party (funding, executive hires, AI hiring surges, job postings that name the problem, tech adoption, launches) and engagement. Each type has a half-life from 14 to 120 days.
+- **Catalog.** 19 types (`domain/signals.py`), six of them negative across first-party (product events, pricing visits), third-party (funding, executive hires, AI hiring surges, job postings that name the problem, tech adoption, launches) and engagement. Each type has a half-life from 14 to 120 days.
 - **Pipeline** (`services/signal_service.py`): validate → dedupe on `hash(type, domain, source_ref)` (unique in Postgres) → persist with evidence and source URL → rescore → emit `signal.created` to workflows.
 - **Thresholding.** Some signals are thresholds, not events. Pricing views become a signal only at 2 or more in 7 days, and at most one per account-week (`services/product_events.py`).
 - **Validation.** `analytics.signal_correlation` compares opportunity rates for accounts with and without each signal. *Demo:* pricing-page activity 14.1% vs 5.8% baseline. The endpoint states the caveat that signal-triggered campaigns also target these accounts.

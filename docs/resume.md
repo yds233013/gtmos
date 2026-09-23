@@ -53,11 +53,11 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 - Wrote an **evaluation harness for generated content** (citation validity, number grounding, banned claims,
   prompt-injection resistance, determinism) which found untrusted feed text being copied verbatim into
   research reports, and fixed it with sentence-level sanitisation at the trust boundary.
-- Modelled the operational database into **analytics marts with dbt** (19 models, 113 tests) and verified the
+- Modelled the operational database into **analytics marts with dbt** (19 models, 132 tests) and verified the
   marts against the API's semantic layer so the two cannot silently drift.
 - Built a **GTM Stack Inspector** and data-quality engine (12 rules, audited remediation such as contact and
   account merges) that computes system health and ranks automation opportunities with traceable evidence.
-- Shipped with **317 backend tests** (132 unit + 185 Postgres integration), **14 component tests** and a
+- Shipped with **461 backend tests** (210 unit + 251 Postgres integration), **14 component tests** and a
   **22-test Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command
   Docker Compose stack.
 
