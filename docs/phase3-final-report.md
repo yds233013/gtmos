@@ -15,7 +15,7 @@ realities — was most of the work.
 - **461 backend tests** (210 unit, 251 Postgres integration), 14 component, 25 e2e, 132 dbt — all
   passing. Migrations apply from empty with no model drift; both Docker images build and the API
   image serves live data.
-- **Three genuine bugs found and fixed**, each by a mechanism built in this phase rather than by
+- **Four genuine bugs found and fixed**, each by a mechanism built in this phase rather than by
   reading code.
 
 ---
@@ -110,7 +110,7 @@ simulated; PostHog and Clay `test` / verified locally. The headline number on th
 
 ---
 
-## 2. The three bugs, and what found them
+## 2. The four bugs, and what found them
 
 None of these came from re-reading code. Each came from a mechanism built to look for them.
 
@@ -140,7 +140,14 @@ not know about. Adding them required checking that every `is_*` flag tests expli
 neither counts as an attributable touch — which is the part that would have silently corrupted
 attribution had it gone the other way.
 
-A fourth, smaller one is worth recording because of how it was found: the test suite was reading the
+**The quality-gate run found the golden flow calling correct behaviour a failure.** Steps 5 and 6
+counted engagement rows inside a ten-minute window, so a second run under the same run key reported
+FAIL — even though the event ids are derived from the run key precisely so that a replay collides
+with itself. The harness was reporting working idempotency as a defect, which is the opposite of the
+signal it exists to give. Both steps now look rows up by the run's own dedupe keys and say when the
+rows were already there. A harness that cries wolf on a re-run is a harness nobody re-runs.
+
+A fifth, smaller one is worth recording because of how it was found: the test suite was reading the
 developer's `.env`, so adding two development secrets turned three passing tests red. A suite whose
 behaviour depends on what happens to be in a local file is not a suite you can trust. `Settings` no
 longer reads `.env` under test.
