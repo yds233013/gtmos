@@ -352,6 +352,7 @@ export interface AccountDetail {
   opportunities: Opportunity[];
   workflow_runs: WorkflowRunSummary[];
   routing_decisions: RoutingDecision[];
+  experiments: AccountExperiment[];
   enrichment: { runs: Record<string, unknown>[]; latest_attempts: EnrichmentAttempt[] };
   stage_history: { id: string; from_stage: string | null; to_stage: string; changed_at: string; changed_by: string; reason: string | null }[];
   audit: AuditEvent[];
@@ -440,6 +441,19 @@ export interface FieldProvenance {
   observed_at: string;
   is_manual_lock: boolean;
   conflict: FieldConflict | null;
+}
+
+/** An experiment this account was enrolled in, with the arm it landed in and what it then did. */
+export interface AccountExperiment {
+  experiment_key: string;
+  experiment: string;
+  status: string;
+  variant: string;
+  variant_key: string;
+  is_control: boolean;
+  assigned_at: string;
+  exposed_at: string | null;
+  outcomes: string[];
 }
 
 export interface MetricDefinition {

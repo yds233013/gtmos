@@ -66,6 +66,41 @@ export function AutomationPanel({ data }: { data: AccountDetail }) {
       </Panel>
 
       <Panel
+        title="Experiments"
+        description="Which tests this account is in, the arm it landed in, and what it did afterwards"
+        bodyClassName="p-0"
+      >
+        {data.experiments.length === 0 ? (
+          <div className="px-4 py-3 text-xs text-subtle">
+            This account is not enrolled in any experiment. Assignment is deterministic, so it will land in the
+            same arm whenever it does enter one.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {data.experiments.map((e) => (
+              <li key={e.experiment_key} className="px-4 py-2.5 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/experiments/${e.experiment_key}`} className="font-medium text-accent-text hover:underline">
+                    {e.experiment}
+                  </Link>
+                  <Badge tone={e.is_control ? "neutral" : "accent"}>{e.variant}</Badge>
+                  <span className="text-muted">{titleCase(e.status)}</span>
+                  <span className="ml-auto text-muted">{dateTime(e.assigned_at)}</span>
+                </div>
+                <div className="mt-1 text-[11px] text-muted">
+                  {e.outcomes.length ? (
+                    <>Recorded outcomes: {e.outcomes.map((o) => titleCase(o)).join(", ")}</>
+                  ) : (
+                    <>No outcome recorded yet for this account.</>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
+      <Panel
         title="Enrichment waterfall (latest run)"
         description="Per field, providers are tried in order until one returns a confident value"
         bodyClassName="p-0"

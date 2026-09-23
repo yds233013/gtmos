@@ -22,6 +22,10 @@ from gtmos.models import (
     Contact,
     EnrichmentAttempt,
     EnrichmentRun,
+    Experiment,
+    ExperimentAssignment,
+    ExperimentOutcome,
+    ExperimentVariant,
     ExternalRecord,
     ICPScore,
     MessageDraft,
@@ -191,6 +195,44 @@ def facets(db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
         "stage": f(Account.funnel_stage),
         "industry": f(Account.industry),
     }
+
+
+def experiment_participation(db: Session, account_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Which experiments this account is in, which arm, and what it did.
+
+    Without this the account page is where the loop visibly breaks: an account is enrolled in a test,
+    the experiments page reports a lift, and nothing on the account says it took part.
+    """
+    rows = db.execute(
+        select(ExperimentAssignment, Experiment, ExperimentVariant)
+        .join(Experiment, Experiment.id == ExperimentAssignment.experiment_id)
+        .join(ExperimentVariant, ExperimentVariant.id == ExperimentAssignment.variant_id)
+        .where(ExperimentAssignment.account_id == account_id)
+        .order_by(ExperimentAssignment.assigned_at.desc())
+    ).all()
+    if not rows:
+        return []
+    outcomes: dict[uuid.UUID, list[str]] = {}
+    for assignment_id, metric in db.execute(
+        select(ExperimentOutcome.assignment_id, ExperimentOutcome.metric).where(
+            ExperimentOutcome.assignment_id.in_([a.id for a, _, _ in rows])
+        )
+    ).tuples():
+        outcomes.setdefault(assignment_id, []).append(metric)
+    return [
+        {
+            "experiment_key": exp.key,
+            "experiment": exp.name,
+            "status": exp.status,
+            "variant": var.name,
+            "variant_key": var.key,
+            "is_control": var.is_control,
+            "assigned_at": assignment.assigned_at,
+            "exposed_at": assignment.exposed_at,
+            "outcomes": sorted(outcomes.get(assignment.id, [])),
+        }
+        for assignment, exp, var in rows
+    ]
 
 
 @router.get("/{account_id}")
@@ -376,6 +418,7 @@ def account_detail(
             }
             for d in decisions
         ],
+        "experiments": experiment_participation(db, a.id),
         "enrichment": {
             "runs": [row(r, exclude=("workspace_id",)) for r in enrich_runs],
             "latest_attempts": [row(x, exclude=("run_id",)) for x in attempts],
