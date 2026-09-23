@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gtmos.domain.matching import match_to_account, normalize_domain, normalize_email
+from gtmos.domain.pql import PQL_THRESHOLD, PQL_WINDOW, PQLAssessment, assess, window_ref
 from gtmos.integrations.posthog import (
     EVENT_SIGNAL_MAP,
     PQL_SIGNALS,
@@ -17,6 +18,7 @@ from gtmos.integrations.posthog import (
     NormalizedEvent,
 )
 from gtmos.models import Account, Contact, Engagement
+from gtmos.services.common import utcnow
 from gtmos.services.signal_service import ingest_signal
 
 PRICING_WINDOW = timedelta(days=7)
@@ -179,3 +181,106 @@ def recent_product_activity(db: Session, account_id: uuid.UUID, since: datetime)
         .group_by(Engagement.event_name)
     )
     return dict(rows.tuples().all())
+
+
+# --------------------------------------------------------------------------------------------------
+# Product-qualified accounts
+# --------------------------------------------------------------------------------------------------
+
+
+def distinct_product_users(db: Session, account_id: uuid.UUID, since: datetime) -> int:
+    """How many different people from this account used the product in the window.
+
+    Counted on the contact where one was resolved and on the raw `distinct_id` otherwise, because a
+    team evaluating a product rarely has every member matched to a CRM contact — and refusing to count
+    the unmatched ones would systematically under-qualify exactly the accounts worth calling.
+    """
+    rows = db.execute(
+        select(Engagement.contact_id, Engagement.distinct_id).where(
+            Engagement.account_id == account_id, Engagement.occurred_at >= since
+        )
+    ).all()
+    seen: set[str] = set()
+    for contact_id, distinct_id in rows:
+        if contact_id is not None:
+            seen.add(f"c:{contact_id}")
+        elif distinct_id:
+            seen.add(f"u:{distinct_id}")
+    return len(seen)
+
+
+def assess_account(db: Session, account: Account, now: datetime | None = None) -> PQLAssessment:
+    now = now or utcnow()
+    since = now - PQL_WINDOW
+    counts = recent_product_activity(db, account.id, since)
+    users = distinct_product_users(db, account.id, since)
+    return assess(str(account.id), distinct_users=users, event_counts=counts, now=now)
+
+
+def evaluate_pql(
+    db: Session,
+    workspace_id: uuid.UUID,
+    account: Account,
+    *,
+    now: datetime | None = None,
+    run_workflows: bool = True,
+    data_origin: str = "live",
+) -> dict[str, Any]:
+    """Assess an account and, if it has newly crossed the bar, record it once and trigger the play.
+
+    Returns the assessment either way, because "why is this account *not* qualified" is the question a
+    rep actually asks, and answering it needs the criteria it missed.
+    """
+    now = now or utcnow()
+    result = assess_account(db, account, now)
+    out: dict[str, Any] = {"assessment": result.as_dict(), "signal": None, "workflow_runs": []}
+    if not result.qualified:
+        return out
+
+    res = ingest_signal(
+        db,
+        account,
+        run_workflows=False,  # the PQL play is emitted explicitly below with its own trigger type
+        signal_type="usage_threshold",
+        title="Product-qualified account",
+        source="gtmos:pql",
+        # One qualification per account per week; see pql.window_ref.
+        source_ref=window_ref(str(account.id), now),
+        observed_at=now,
+        confidence=0.95,
+        explanation=result.summary,
+        evidence={
+            "pql_score": result.score,
+            "threshold": PQL_THRESHOLD,
+            "distinct_users": result.distinct_users,
+            "criteria_met": [m["key"] for m in result.met],
+            "window_days": result.window_days,
+        },
+        data_origin=data_origin,
+    )
+    out["signal"] = {
+        "id": str(res.signal.id),
+        "created": res.created,
+        "score_before": res.score_before,
+        "score_after": res.score_after,
+    }
+    if res.created and run_workflows:
+        from gtmos.services.workflow_engine import emit_event
+
+        runs = emit_event(
+            db,
+            workspace_id,
+            "product.pql",
+            str(res.signal.id),
+            account,
+            {
+                "pql": {
+                    "score": result.score,
+                    "signal_id": str(res.signal.id),
+                    "criteria": [m["key"] for m in result.met],
+                }
+            },
+            data_origin=data_origin,
+        )
+        out["workflow_runs"] = [str(r.id) for r in runs]
+    return out

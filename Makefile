@@ -7,7 +7,7 @@ DBT_FLAGS := --project-dir $(CURDIR)/$(WAREHOUSE) --profiles-dir $(CURDIR)/$(WAR
 API_PORT ?= 8010
 WEB_PORT ?= 3010
 
-.PHONY: help setup dev-deps migrate seed reset backtest llm-eval api worker web dev up down logs n8n \
+.PHONY: help setup dev-deps migrate seed reset backtest llm-eval golden-flow api worker web dev up down logs n8n \
         warehouse warehouse-refresh warehouse-docs \
         test test-api test-unit test-web e2e lint typecheck format check clean
 
@@ -35,6 +35,9 @@ backtest: ## Regenerate docs/scoring-backtest.md from the current dataset
 
 llm-eval: ## Grade the configured research writer against the golden set (no database, no network)
 	cd $(API) && uv run python -m gtmos.llmeval --out ../../docs/llm-eval-report.md
+
+golden-flow: ## Run the end-to-end golden scenario against a running stack (add VIA_N8N=1 to route through n8n)
+	cd $(API) && uv run python -m gtmos.goldenflow $(if $(VIA_N8N),--via-n8n,)
 
 api: ## Run the API with reload on :$(API_PORT)
 	cd $(API) && uv run uvicorn gtmos.main:app --port $(API_PORT) --reload --reload-dir src

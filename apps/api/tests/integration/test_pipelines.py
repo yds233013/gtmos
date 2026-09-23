@@ -497,5 +497,6 @@ def test_a_retryable_failure_is_retried_and_a_permanent_one_is_not(client, db, w
     db.flush()
     assert len(calls) > 1, "retryable failures should have produced a second round"
     assert sync.retries > 0
-    # The permanent 400 is reported, not retried forever.
-    assert any("400 bad" in e for e in sync.errors)
+    # The permanent 400 is reported, not retried forever. Errors are dicts, matching the shape the
+    # company sync writes and the Operations page reads.
+    assert any("400 bad" in str(e.get("error", "")) for e in sync.errors)

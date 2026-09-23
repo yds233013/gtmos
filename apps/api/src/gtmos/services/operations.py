@@ -103,6 +103,16 @@ def workflow_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]
     }
 
 
+def _first_error(errors: Any) -> str | None:
+    if not errors:
+        return None
+    first = errors[0]
+    if isinstance(first, dict):
+        value = first.get("error")
+        return str(value) if value is not None else None
+    return str(first)
+
+
 def sync_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]:
     since = utcnow() - timedelta(days=days)
     runs = list(
@@ -146,7 +156,10 @@ def sync_health(db: Session, ws: uuid.UUID, days: int = 7) -> dict[str, Any]:
                 "is_simulated": r.is_simulated,
                 "trigger": r.trigger,
                 "correlation_id": r.correlation_id,
-                "error": (r.errors or [{}])[0].get("error") if r.errors else None,
+                # Defensive: a sync writing a bare string here used to take the whole Operations page
+                # down with an AttributeError. An observability surface that dies on malformed input is
+                # the opposite of observability.
+                "error": _first_error(r.errors),
             }
             for r in runs[:15]
         ],

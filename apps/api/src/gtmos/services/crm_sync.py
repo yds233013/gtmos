@@ -501,7 +501,7 @@ def run_contact_and_deal_sync(
     db.flush()
 
     now = utcnow()
-    errors: list[str] = []
+    errors: list[dict[str, Any]] = []
     succeeded = failed = associations_made = 0
 
     def _upsert_with_retry(object_type: str, records: list[UpsertRecord]) -> tuple[dict[uuid.UUID, str], int, int, int]:
@@ -513,7 +513,7 @@ def run_contact_and_deal_sync(
         outstanding = {r.internal_id: r for r in records}
         external: dict[uuid.UUID, str] = {}
         ok = bad = retried = 0
-        problems: list[str] = []
+        problems: list[dict[str, Any]] = []
         for round_no in range(1, MAX_RETRY_ROUNDS + 1):
             if not outstanding:
                 break
@@ -532,7 +532,9 @@ def run_contact_and_deal_sync(
                     continue
                 bad += 1
                 if res.error:
-                    problems.append(f"{object_type[:-1]} {res.internal_id}: {res.error}")
+                    problems.append(
+                        {"object_type": object_type, "id": str(res.internal_id), "error": res.error, "retryable": False}
+                    )
             outstanding = still
         errors.extend(problems[:25])
         by_id = {r.internal_id: r for r in records}
@@ -582,7 +584,7 @@ def run_contact_and_deal_sync(
                 if r.status == "failed":
                     failed += 1
                     if r.error:
-                        errors.append(f"associate {from_type}: {r.error}")
+                        errors.append({"object_type": from_type, "error": r.error, "retryable": r.retryable})
                 else:
                     associations_made += 1
 
