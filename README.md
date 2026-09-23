@@ -440,7 +440,8 @@ HubSpot, Clay, n8n and PostHog through this repository.
 
 **Phase reports**
 [Phase 2 audit](docs/phase2-audit.md) · [Phase 2 final](docs/phase2-final-report.md) ·
-[Phase 3 baseline](docs/phase3-baseline.md) · [Phase 3 final](docs/phase3-final-report.md)
+[Phase 3 baseline](docs/phase3-baseline.md) · [Phase 3 final](docs/phase3-final-report.md) ·
+[Phase 3 handoff](docs/phase3-handoff.md)
 
 **Tool research** (written from official documentation)
 [HubSpot](docs/research/hubspot.md) · [n8n](docs/research/n8n.md) ·
