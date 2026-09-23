@@ -12,10 +12,12 @@ from gtmos.domain.enrichment import ProviderError
 from gtmos.integrations.enrichment_providers import ApolloOrganizationProvider
 from gtmos.integrations.hubspot import BATCH_LIMIT, RealHubSpotAdapter, UpsertRecord, chunks
 from gtmos.integrations.signatures import (
+    hubspot_v1_signature,
+    hubspot_v2_signature,
     hubspot_v3_signature,
     sign_gtmos,
     verify_gtmos,
-    verify_hubspot_v3,
+    verify_hubspot,
     verify_token,
 )
 
@@ -159,11 +161,18 @@ def test_hubspot_v3_signature_verification():
     secret, body, uri = "client-secret", b'[{"eventId":1}]', "https://gtmos.example/api/v1/webhooks/hubspot"
     ts = str(int(time.time() * 1000))
     sig = hubspot_v3_signature(secret, "POST", uri, body, ts)
-    assert verify_hubspot_v3(secret, "POST", uri, body, sig, ts) == (True, "valid")
-    assert verify_hubspot_v3(secret, "POST", uri, body + b" ", sig, ts)[0] is False
+    assert verify_hubspot(secret, "POST", uri, body, signature_v3=sig, timestamp_ms=ts) == (True, "valid (v3)")
+    assert verify_hubspot(secret, "POST", uri, body + b" ", signature_v3=sig, timestamp_ms=ts)[0] is False
     stale = str(int((time.time() - 600) * 1000))
     assert (
-        verify_hubspot_v3(secret, "POST", uri, body, hubspot_v3_signature(secret, "POST", uri, body, stale), stale)[1]
+        verify_hubspot(
+            secret,
+            "POST",
+            uri,
+            body,
+            signature_v3=hubspot_v3_signature(secret, "POST", uri, body, stale),
+            timestamp_ms=stale,
+        )[1]
         == "timestamp older than 5 minutes"
     )
 
@@ -172,4 +181,90 @@ def test_hubspot_v3_rejects_future_timestamps():
     secret, body, uri = "s", b"[]", "https://gtmos.example/api/v1/webhooks/hubspot"
     future = str(int((time.time() + 600) * 1000))
     sig = hubspot_v3_signature(secret, "POST", uri, body, future)
-    assert verify_hubspot_v3(secret, "POST", uri, body, sig, future) == (False, "timestamp is in the future")
+    assert verify_hubspot(secret, "POST", uri, body, signature_v3=sig, timestamp_ms=future) == (
+        False,
+        "timestamp is in the future",
+    )
+
+
+def test_hubspot_v1_is_accepted_because_private_apps_send_it():
+    """A private app is what a free developer test account uses, and it signs with v1, not v3.
+
+    A verifier that only understands v3 rejects every delivery from the environment the integration is
+    most likely to be tested in — which looks like a broken integration rather than a wrong verifier.
+    """
+    secret, body = "client-secret", b'[{"eventId":1,"subscriptionType":"company.propertyChange"}]'
+    uri = "https://gtmos.example/api/v1/webhooks/hubspot"
+    sig = hubspot_v1_signature(secret, body)
+    ok, why = verify_hubspot(secret, "POST", uri, body, signature_v3=None, timestamp_ms=None, signature_v1_or_v2=sig)
+    assert ok is True
+    # The detail has to say it verified without a replay window, because that is a weaker guarantee
+    # and the Operations page shows it.
+    assert "v1" in why and "replay" in why
+    assert (
+        verify_hubspot(secret, "POST", uri, body + b"x", signature_v3=None, timestamp_ms=None, signature_v1_or_v2=sig)[
+            0
+        ]
+        is False
+    )
+
+
+def test_hubspot_v2_is_accepted_when_the_version_header_says_so():
+    secret, body = "client-secret", b'{"from":"a workflow webhook action"}'
+    uri = "https://gtmos.example/api/v1/webhooks/hubspot"
+    sig = hubspot_v2_signature(secret, "POST", uri, body)
+    ok, why = verify_hubspot(
+        secret,
+        "POST",
+        uri,
+        body,
+        signature_v3=None,
+        timestamp_ms=None,
+        signature_v1_or_v2=sig,
+        signature_version="v2",
+    )
+    assert ok is True and "v2" in why
+    # v1 and v2 are different source strings, so a v2 signature must fail when read as v1.
+    assert (
+        verify_hubspot(
+            secret,
+            "POST",
+            uri,
+            body,
+            signature_v3=None,
+            timestamp_ms=None,
+            signature_v1_or_v2=sig,
+            signature_version="v1",
+        )[0]
+        is False
+    )
+
+
+def test_v3_is_preferred_when_both_headers_are_present():
+    secret, body = "s", b"[]"
+    uri = "https://gtmos.example/hook"
+    ts = str(int(time.time() * 1000))
+    good_v3 = hubspot_v3_signature(secret, "POST", uri, body, ts)
+    ok, why = verify_hubspot(
+        secret,
+        "POST",
+        uri,
+        body,
+        signature_v3=good_v3,
+        timestamp_ms=ts,
+        signature_v1_or_v2="not-a-real-v1-signature",
+    )
+    assert ok is True and "v3" in why
+
+
+def test_the_uri_is_signed_exactly_as_received():
+    """An earlier version unquoted the URI, which corrupts any percent-encoded character in it."""
+    secret, body = "s", b"[]"
+    uri = "https://gtmos.example/api/v1/webhooks/hubspot?filter=a%20b&next=x%2Fy"
+    ts = str(int(time.time() * 1000))
+    sig = hubspot_v3_signature(secret, "POST", uri, body, ts)
+    assert verify_hubspot(secret, "POST", uri, body, signature_v3=sig, timestamp_ms=ts)[0] is True
+    # Signing the decoded form must NOT verify: that was the bug.
+    decoded = "https://gtmos.example/api/v1/webhooks/hubspot?filter=a b&next=x/y"
+    bad = hubspot_v3_signature(secret, "POST", decoded, body, ts)
+    assert verify_hubspot(secret, "POST", uri, body, signature_v3=bad, timestamp_ms=ts)[0] is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -10,7 +11,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=("../../.env", ".env"), env_file_encoding="utf-8", extra="ignore")
+    # `.env` is read for developer convenience, but never under test: a suite whose behaviour depends on
+    # whether a developer happens to have WEBHOOK_SECRET in their local file is not a suite you can
+    # trust. Tests set every variable they depend on explicitly.
+    model_config = SettingsConfigDict(
+        env_file=None if os.environ.get("ENV") == "test" else ("../../.env", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     env: Literal["development", "test", "production"] = "development"
     database_url: str = "postgresql+psycopg://gtmos:gtmos@localhost:56432/gtmos"
@@ -39,6 +47,12 @@ class Settings(BaseSettings):
 
     # Optional real enrichment adapter.
     apollo_api_key: SecretStr | None = None
+
+    # Clay (optional). The webhook secret is Clay's `signingSecret`, shown once when the webhook is
+    # registered; the API key is the workspace key from Settings → Account → API keys (beta). Without
+    # the API key the outbound client is inert and GTMOS only receives.
+    clay_webhook_secret: SecretStr | None = None
+    clay_api_key: SecretStr | None = None
 
     # Outbound sending is never performed by GTMOS V1; this flag only documents the boundary.
     outbound_send_enabled: bool = False

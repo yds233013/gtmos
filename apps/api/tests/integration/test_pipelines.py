@@ -398,3 +398,104 @@ def test_reverse_etl_never_overwrites_crm_owned_fields(db, ws):
     later = plan_company_sync(db, ws.id, [target], full_record=False).changes[0]
     assert not later.is_new
     assert all(k.startswith("gtmos_") for k in later.properties), later.properties
+
+
+def test_contacts_and_deals_sync_creates_associations_to_their_company(client, db, ws):
+    """A CRM of companies with nothing attached is not a CRM; associations are what make it one."""
+    from gtmos.models import SimulatedCrmObject
+    from gtmos.services.crm_sync import run_company_sync, run_contact_and_deal_sync
+
+    run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="test")
+    sync = run_contact_and_deal_sync(db, ws.id, job="reverse_etl_contacts_deals", trigger="test")
+    db.flush()
+
+    assert sync.status in ("succeeded", "partial")
+    assert sync.details["contacts"] > 0
+    assert sync.details["associations"] > 0
+
+    contact = db.scalars(
+        select(SimulatedCrmObject).where(
+            SimulatedCrmObject.workspace_id == ws.id, SimulatedCrmObject.object_type == "contacts"
+        )
+    ).first()
+    assert contact is not None
+    assert contact.associations, "a synced contact must be associated with its company"
+    link = contact.associations[0]
+    # 1 is "contact to primary company". 279 is the non-primary variant, and using the wrong one
+    # silently changes which company owns the contact for reporting and territory purposes.
+    assert link["type_id"] == 1
+    assert link["to_type"] == "companies"
+    company = db.scalars(
+        select(SimulatedCrmObject).where(
+            SimulatedCrmObject.workspace_id == ws.id,
+            SimulatedCrmObject.object_type == "companies",
+            SimulatedCrmObject.external_id == link["to_external_id"],
+        )
+    ).first()
+    assert company is not None, "the association points at a company that does not exist"
+
+
+def test_associating_twice_does_not_duplicate_the_link(client, db, ws):
+    """HubSpot treats a repeated association as a no-op, so a replayed sync must too."""
+    from gtmos.models import SimulatedCrmObject
+    from gtmos.services.crm_sync import run_company_sync, run_contact_and_deal_sync
+
+    run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="test")
+    run_contact_and_deal_sync(db, ws.id, trigger="test")
+    db.flush()
+    first = {
+        o.external_id: len(o.associations or [])
+        for o in db.scalars(
+            select(SimulatedCrmObject).where(
+                SimulatedCrmObject.workspace_id == ws.id, SimulatedCrmObject.object_type == "contacts"
+            )
+        )
+    }
+    run_contact_and_deal_sync(db, ws.id, trigger="test-replay")
+    db.flush()
+    second = {
+        o.external_id: len(o.associations or [])
+        for o in db.scalars(
+            select(SimulatedCrmObject).where(
+                SimulatedCrmObject.workspace_id == ws.id, SimulatedCrmObject.object_type == "contacts"
+            )
+        )
+    }
+    assert first == second
+
+
+def test_a_retryable_failure_is_retried_and_a_permanent_one_is_not(client, db, ws):
+    """Bounded retry: transient 429s are absorbed, permanent errors are reported immediately."""
+    from gtmos.integrations.hubspot import BatchOutcome, UpsertResult
+    from gtmos.services.crm_sync import run_company_sync, run_contact_and_deal_sync
+
+    run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="test")
+    db.flush()
+
+    calls: list[int] = []
+
+    class FlakyThenFine:
+        provider = "hubspot"
+        is_simulated = True
+
+        def upsert(self, object_type, records):
+            calls.append(len(records))
+            out = BatchOutcome()
+            for i, r in enumerate(records):
+                if len(calls) == 1 and i % 2 == 0:
+                    out.results.append(UpsertResult(r.internal_id, "failed", error="429", retryable=True))
+                elif i == 1 and len(calls) == 1:
+                    out.results.append(UpsertResult(r.internal_id, "failed", error="400 bad", retryable=False))
+                else:
+                    out.results.append(UpsertResult(r.internal_id, "updated", f"ext-{i}"))
+            return out
+
+        def associate(self, from_type, to_type, pairs):
+            return BatchOutcome()
+
+    sync = run_contact_and_deal_sync(db, ws.id, trigger="test", adapter=FlakyThenFine())
+    db.flush()
+    assert len(calls) > 1, "retryable failures should have produced a second round"
+    assert sync.retries > 0
+    # The permanent 400 is reported, not retried forever.
+    assert any("400 bad" in e for e in sync.errors)

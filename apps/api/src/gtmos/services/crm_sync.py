@@ -24,13 +24,25 @@ from sqlalchemy.orm import Session
 
 from gtmos.config import get_settings
 from gtmos.integrations.hubspot import (
+    AssociationRequest,
     CrmAdapter,
     DemoHubSpotAdapter,
     RealHubSpotAdapter,
     UpsertRecord,
     company_properties,
+    contact_properties,
+    deal_properties,
 )
-from gtmos.models import Account, ExternalRecord, Integration, IntegrationSync, Signal
+from gtmos.models import (
+    Account,
+    AccountContactRole,
+    Contact,
+    ExternalRecord,
+    Integration,
+    IntegrationSync,
+    Opportunity,
+    Signal,
+)
 from gtmos.services import governance
 from gtmos.services.common import audit, correlation_id, jsonable, utcnow
 from gtmos.services.next_action import next_best_action, next_best_actions
@@ -350,3 +362,252 @@ def simulated_crm_counts(db: Session, workspace_id: uuid.UUID) -> dict[str, int]
         .tuples()
         .all()
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Contacts, deals and associations
+# --------------------------------------------------------------------------------------------------
+#
+# Phase 2 shipped company sync only: contacts and deals were mapped but never scheduled, so the CRM
+# side of the demo was a list of companies with nothing attached. A company record with no contacts and
+# no deals is not a CRM — associations are what make it one, and they are also the part most
+# integrations get wrong (see ASSOCIATION_TYPES in integrations/hubspot.py for the primary-vs-general
+# trap).
+
+
+def _external(db: Session, object_type: str, internal_ids: list[uuid.UUID]) -> dict[uuid.UUID, ExternalRecord]:
+    if not internal_ids:
+        return {}
+    return {
+        e.internal_id: e
+        for e in db.scalars(
+            select(ExternalRecord).where(
+                ExternalRecord.provider == "hubspot",
+                ExternalRecord.object_type == object_type,
+                ExternalRecord.internal_id.in_(internal_ids),
+            )
+        )
+    }
+
+
+def _record_sync(
+    db: Session,
+    workspace_id: uuid.UUID,
+    object_type: str,
+    internal_id: uuid.UUID,
+    external_id: str | None,
+    props: dict[str, Any],
+    is_simulated: bool,
+    now: datetime,
+) -> None:
+    ext = _external(db, object_type, [internal_id]).get(internal_id)
+    if ext is None:
+        ext = ExternalRecord(
+            workspace_id=workspace_id,
+            provider="hubspot",
+            object_type=object_type,
+            internal_id=internal_id,
+            is_simulated=is_simulated,
+        )
+        db.add(ext)
+    ext.external_id = external_id or ext.external_id
+    ext.last_payload = props
+    ext.last_payload_hash = payload_hash(props)
+    ext.last_synced_at = now
+    ext.is_simulated = is_simulated
+
+
+def run_contact_and_deal_sync(
+    db: Session,
+    workspace_id: uuid.UUID,
+    account_ids: list[uuid.UUID] | None = None,
+    *,
+    job: str = "reverse_etl_contacts_deals",
+    trigger: str = "manual",
+    adapter: CrmAdapter | None = None,
+    limit_accounts: int = 200,
+) -> IntegrationSync:
+    """Push contacts and opportunities for accounts that already exist in the CRM, then associate them.
+
+    Ordering is the whole design. An association can only be created between two records that already
+    exist, so this runs strictly after the company sync and skips any account with no company record
+    rather than creating one implicitly — a contact that quietly conjures a company is how duplicate
+    companies get into a CRM.
+    """
+    governance.require(db, workspace_id, "crm_writes_enabled")
+    adapter = adapter or get_adapter(db, workspace_id)
+    started = utcnow()
+    t0 = time.perf_counter()
+
+    q = select(Account).where(
+        Account.workspace_id == workspace_id,
+        Account.merged_into_id.is_(None),
+        Account.domain.is_not(None),
+    )
+    if account_ids is not None:
+        q = q.where(Account.id.in_(account_ids))
+    else:
+        q = q.where(Account.score_grade.in_(["A", "B"]))
+    accounts = list(db.scalars(q.limit(limit_accounts)))
+    company_ext = _external(db, "companies", [a.id for a in accounts])
+    # Only accounts whose company is already in the CRM can carry associations.
+    syncable = [a for a in accounts if a.id in company_ext and company_ext[a.id].external_id]
+
+    contacts = (
+        list(
+            db.scalars(
+                select(Contact).where(
+                    Contact.account_id.in_([a.id for a in syncable]),
+                    Contact.merged_into_id.is_(None),
+                    Contact.email.is_not(None),
+                )
+            )
+        )
+        if syncable
+        else []
+    )
+    opps = (
+        list(db.scalars(select(Opportunity).where(Opportunity.account_id.in_([a.id for a in syncable]))))
+        if syncable
+        else []
+    )
+    roles = (
+        {
+            r.contact_id: r.role
+            for r in db.scalars(
+                select(AccountContactRole).where(AccountContactRole.contact_id.in_([c.id for c in contacts]))
+            )
+        }
+        if contacts
+        else {}
+    )
+
+    sync = IntegrationSync(
+        workspace_id=workspace_id,
+        provider=adapter.provider,
+        job=job,
+        direction="outbound",
+        object_type="contacts_deals",
+        status="running",
+        is_simulated=adapter.is_simulated,
+        records_considered=len(contacts) + len(opps),
+        records_changed=0,
+        records_skipped=0,
+        correlation_id=correlation_id(),
+        started_at=started,
+        trigger=trigger,
+    )
+    db.add(sync)
+    db.flush()
+
+    now = utcnow()
+    errors: list[str] = []
+    succeeded = failed = associations_made = 0
+
+    def _upsert_with_retry(object_type: str, records: list[UpsertRecord]) -> tuple[dict[uuid.UUID, str], int, int, int]:
+        """Upsert records, retrying only the ones that failed *retryably*.
+
+        Bounded at MAX_RETRY_ROUNDS, matching the company sync. A permanent failure — a 400 on a bad
+        property — is never retried, because retrying it only burns rate limit and delays the report.
+        """
+        outstanding = {r.internal_id: r for r in records}
+        external: dict[uuid.UUID, str] = {}
+        ok = bad = retried = 0
+        problems: list[str] = []
+        for round_no in range(1, MAX_RETRY_ROUNDS + 1):
+            if not outstanding:
+                break
+            if round_no > 1:
+                retried += len(outstanding)
+            outcome = adapter.upsert(object_type, list(outstanding.values()))
+            still: dict[uuid.UUID, UpsertRecord] = {}
+            for res in outcome.results:
+                if res.status != "failed":
+                    ok += 1
+                    if res.external_id:
+                        external[res.internal_id] = res.external_id
+                    continue
+                if res.retryable and round_no < MAX_RETRY_ROUNDS:
+                    still[res.internal_id] = outstanding[res.internal_id]
+                    continue
+                bad += 1
+                if res.error:
+                    problems.append(f"{object_type[:-1]} {res.internal_id}: {res.error}")
+            outstanding = still
+        errors.extend(problems[:25])
+        by_id = {r.internal_id: r for r in records}
+        for internal_id, external_id in external.items():
+            _record_sync(
+                db,
+                workspace_id,
+                object_type,
+                internal_id,
+                external_id,
+                by_id[internal_id].properties,
+                adapter.is_simulated,
+                now,
+            )
+        return external, ok, bad, retried
+
+    contact_records = [
+        UpsertRecord(c.id, (c.email or "").lower(), contact_properties(c, roles.get(c.id))) for c in contacts
+    ]
+    contact_external, c_ok, c_bad, c_retried = _upsert_with_retry("contacts", contact_records)
+    succeeded += c_ok
+    failed += c_bad
+
+    deal_records = [UpsertRecord(o.id, str(o.id), deal_properties(o)) for o in opps]
+    deal_external, d_ok, d_bad, d_retried = _upsert_with_retry("deals", deal_records)
+    succeeded += d_ok
+    failed += d_bad
+    sync.retries = c_retried + d_retried
+
+    associate = getattr(adapter, "associate", None)
+    if callable(associate):
+        contact_pairs = [
+            AssociationRequest(from_id=contact_external[c.id], to_id=company_ext[c.account_id].external_id or "")
+            for c in contacts
+            if c.id in contact_external and c.account_id in company_ext
+        ]
+        deal_pairs = [
+            AssociationRequest(from_id=deal_external[o.id], to_id=company_ext[o.account_id].external_id or "")
+            for o in opps
+            if o.id in deal_external and o.account_id in company_ext
+        ]
+        for from_type, pairs in (("contacts", contact_pairs), ("deals", deal_pairs)):
+            if not pairs:
+                continue
+            res = associate(from_type, "companies", pairs)
+            for r in res.results:
+                if r.status == "failed":
+                    failed += 1
+                    if r.error:
+                        errors.append(f"associate {from_type}: {r.error}")
+                else:
+                    associations_made += 1
+
+    sync.records_succeeded = succeeded
+    sync.records_failed = failed
+    sync.records_changed = succeeded
+    sync.errors = errors[:50]
+    sync.status = "succeeded" if not failed else ("partial" if succeeded else "failed")
+    sync.finished_at = utcnow()
+    sync.duration_ms = int((time.perf_counter() - t0) * 1000)
+    sync.details = {
+        "contacts": len(contact_records),
+        "deals": len(deal_records),
+        "associations": associations_made,
+        "accounts_skipped_no_company": len(accounts) - len(syncable),
+    }
+    audit(
+        db,
+        workspace_id,
+        "integration.synced",
+        "integration_sync",
+        sync.id,
+        after={"job": job, "status": sync.status, "associations": associations_made},
+        actor_type="system",
+        actor="crm_sync",
+    )
+    db.flush()
+    return sync

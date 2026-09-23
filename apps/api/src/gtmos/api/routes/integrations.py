@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from gtmos.api.deps import db_session, parse_uuid, require_admin_for_live_writes, row, workspace
 from gtmos.config import get_settings
+from gtmos.integrations.clay import API_KEY_HEADER, CLAY_API_BASE, SIGNATURE_HEADER, ClayClient
 from gtmos.integrations.hubspot import CUSTOM_PROPERTIES, ID_PROPERTY
 from gtmos.integrations.posthog import normalize, parse_payload
 from gtmos.models import (
@@ -24,7 +25,7 @@ from gtmos.models import (
     WebhookEvent,
     Workspace,
 )
-from gtmos.services import crm_sync, webhook_service
+from gtmos.services import clay_service, crm_sync, webhook_service
 from gtmos.services.product_events import ingest_events
 
 router = APIRouter(tags=["integrations"])
@@ -100,6 +101,23 @@ def reverse_etl_preview(
 @router.post("/integrations/hubspot/reverse-etl/run", dependencies=[Depends(require_admin_for_live_writes)])
 def reverse_etl_run(db: Session = Depends(db_session), ws: Workspace = Depends(workspace)) -> dict[str, Any]:
     sync = crm_sync.run_company_sync(db, ws.id, job="reverse_etl_companies", trigger="manual")
+    db.commit()
+    return row(sync, exclude=("workspace_id",))
+
+
+@router.post(
+    "/integrations/hubspot/reverse-etl/contacts-deals", dependencies=[Depends(require_admin_for_live_writes)]
+)
+def reverse_etl_contacts_deals(
+    db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
+) -> dict[str, Any]:
+    """Push contacts and deals for accounts already in the CRM, then associate them to their company.
+
+    Deliberately a separate call from the company sync: an association needs both records to exist, so
+    companies must land first. Running this against an account with no company record skips it rather
+    than creating one, because a contact that conjures a company is how duplicate companies appear.
+    """
+    sync = crm_sync.run_contact_and_deal_sync(db, ws.id, job="reverse_etl_contacts_deals", trigger="manual")
     db.commit()
     return row(sync, exclude=("workspace_id",))
 
@@ -255,6 +273,69 @@ async def webhook_hubspot(
     return await _receive(request, response, db, ws, "hubspot", "crm_change", process)
 
 
+@router.post("/webhooks/clay")
+async def webhook_clay(
+    request: Request, response: Response, db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
+) -> dict[str, Any]:
+    """An enriched record pushed from a Clay table, signed with HMAC-SHA256 in `X-Clay-Signature`.
+
+    The payload contract is GTMOS's, not Clay's: Clay's HTTP API column body is a JSON template the
+    operator writes, so there is no standard Clay envelope to parse. `docs/clay-live-setup.md` is what
+    a Clay table is configured against. Ingestion runs through the same pipeline as every other source.
+    """
+    body = await request.body()
+    if len(body) > 1_000_000:
+        raise HTTPException(413, "payload too large")
+    try:
+        res = clay_service.receive(db, ws, dict(request.headers), body, method=request.method, uri=str(request.url))
+    except clay_service.ClaySignatureError as exc:
+        # Nothing is stored: unlike the sources whose scheme `webhook_service` verifies itself, an
+        # unverified Clay delivery is turned away at the door rather than persisted as a rejected event.
+        raise HTTPException(401, f"Clay signature check failed: {exc}") from exc
+    db.commit()
+    response.status_code = res.http_status
+    ev = res.event
+    return {
+        "id": str(ev.id),
+        "status": "duplicate" if res.duplicate else ev.status,
+        "duplicate": res.duplicate,
+        "signature": ev.signature_status,
+        "error": ev.error,
+        "result": ev.result,
+        "correlation_id": ev.correlation_id,
+    }
+
+
+@router.get("/integrations/clay/contract")
+def clay_contract() -> dict[str, Any]:
+    """The columns GTMOS parses out of a Clay row, and the state of the outbound client.
+
+    Published as an endpoint because the Clay table is configured by hand against this list: a column
+    name that is not here is silently ignored, and reading it from the running API beats trusting a doc.
+    """
+    s = get_settings()
+    client = ClayClient.from_settings(s)
+    return {
+        "endpoint": "/api/v1/webhooks/clay",
+        "signature_header": SIGNATURE_HEADER,
+        "signature_scheme": "sha256=<hex HMAC-SHA256(signing_secret, raw_body)>",
+        "webhook_secret_configured": s.clay_webhook_secret is not None,
+        "idempotency": "clay_row_id (+ clay_run_id when present); redeliveries are deduplicated",
+        "account_columns": {f: list(spec.aliases) for f, spec in clay_service.ACCOUNT_FIELDS.items()},
+        "contact_columns": {f: list(spec.aliases) for f, spec in clay_service.CONTACT_FIELDS.items()},
+        "cell_envelope": ["value", "provider", "confidence", "observed_at", "status", "others"],
+        "unresolved_cell_statuses": sorted(clay_service.UNRESOLVED_CELL_STATUSES),
+        "default_confidence": clay_service.CLAY_DEFAULT_CONFIDENCE,
+        "outbound": {
+            "base_url": CLAY_API_BASE,
+            "auth_header": API_KEY_HEADER,
+            "mode": client.mode,
+            "note": "Inert without CLAY_API_KEY: no network call is made and none is made in demo mode.",
+        },
+        "verified_against_live_clay": False,
+    }
+
+
 @router.get("/webhooks/events")
 def webhook_events(
     source: str | None = None,
@@ -285,7 +366,11 @@ def webhook_replay(
         raise HTTPException(404, "event not found")
     if ev.payload.get("synthetic_history"):
         raise HTTPException(409, "Synthetic history events are illustrative and cannot be replayed.")
-    processor = {"posthog": _posthog_processor(ws), "n8n": _signal_processor(ws)}.get(ev.source)
+    processor = {
+        "posthog": _posthog_processor(ws),
+        "n8n": _signal_processor(ws),
+        "clay": clay_service.processor(ws),
+    }.get(ev.source)
     if processor is None:
         raise HTTPException(409, f"replay not supported for source '{ev.source}'")
     try:

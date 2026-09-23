@@ -89,19 +89,38 @@ services:
 
   # Optional: local n8n for importing the templates in integrations/n8n. `make n8n`.
   n8n:
-    image: n8nio/n8n:latest
+    # Pinned, not :latest. An orchestration layer that silently changes version under you is the thing
+    # this project is supposed to know better than.
+    image: n8nio/n8n:2.40.5
     profiles: ["n8n"]
     ports:
       - "5678:5678"
     environment:
-      GTMOS_BASE_URL: http://api:8000
+      # Defaults to the host-run API (`make dev`), because that is how this is developed. Override to
+      # http://api:8000 when the whole stack runs in compose.
+      GTMOS_BASE_URL: ${N8N_GTMOS_BASE_URL:-http://host.docker.internal:8010}
       GTMOS_WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       GTMOS_ADMIN_TOKEN: ${ADMIN_API_TOKEN:-}
       HUBSPOT_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"   # templates read $env (n8n 2.x blocks it by default)
       NODE_FUNCTION_ALLOW_BUILTIN: crypto     # template 01 signs requests with HMAC
+      # Deterministic webhook URLs for the docs and the golden flow. N8N_WEBHOOK_URL, not WEBHOOK_URL:
+      # the unprefixed form is deprecated from 2.35.0.
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      N8N_DIAGNOSTICS_ENABLED: "false"        # no telemetry from a portfolio demo
+      N8N_SECURE_COOKIE: "false"              # served over plain http on localhost
+      # N8N_RUNNERS_ENABLED is deliberately absent: it is deprecated from n8n 2.0 and setting it now
+      # produces a warning rather than doing anything.
+    extra_hosts:
+      # Docker Desktop provides this automatically; Linux does not.
+      - "host.docker.internal:host-gateway"
     volumes:
       - n8ndata:/home/node/.n8n
+      # Workflow definitions are version-controlled and mounted read-only so `n8n import:workflow`
+      # inside the container reads exactly what is in git.
+      - ./integrations/n8n:/workflows:ro
 
 volumes:
   pgdata:

@@ -153,6 +153,9 @@ class IntegrationSync(IdMixin, Base):
     records_skipped: Mapped[int] = mapped_column(Integer, default=0)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[list[Any]] = mapped_column(default=list)
+    # Job-specific counters the generic records_* columns cannot express — how many associations were
+    # created, how many accounts were skipped and why. Read by the Operations drilldown.
+    details: Mapped[dict[str, Any]] = mapped_column(default=dict)
     correlation_id: Mapped[str] = mapped_column(String(64))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -267,5 +270,9 @@ class SimulatedCrmObject(IdMixin, Base):
         String(320)
     )  # the upsert key: gtmos_account_id (companies) or email (contacts)
     properties: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # Associations to other simulated objects, as [{"to_type", "to_external_id", "type_id"}]. Held on
+    # the record rather than in a join table because the simulated CRM mirrors HubSpot's shape, where
+    # associations are read back per record.
+    associations: Mapped[list[Any]] = mapped_column(default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

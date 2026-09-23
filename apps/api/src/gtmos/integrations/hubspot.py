@@ -82,6 +82,34 @@ CUSTOM_PROPERTIES: dict[str, list[dict[str, Any]]] = {
 
 PROPERTY_GROUPS = {"companies": "companyinformation", "contacts": "contactinformation", "deals": "dealinformation"}
 
+# HubSpot-defined association type IDs, from the "Association type ID values" table (see
+# docs/research/hubspot.md §4 for the citation).
+#
+# The trap: 1/2 and 5/6 are the **primary** company types — legacy ids that predate multi-company
+# support — and 279/280, 341/342 are the general ones. Using 1 when you meant "just associate these
+# two" silently sets the contact's primary company, which is the field a rep's territory and a lot of
+# reporting keys off. GTMOS writes the primary types deliberately, because in this data model an
+# account *is* the contact's company, and says so here rather than leaving a bare integer in a payload.
+ASSOCIATION_TYPES: dict[tuple[str, str], int] = {
+    ("contacts", "companies"): 1,  # contact → primary company (279 = non-primary)
+    ("companies", "contacts"): 2,  # company → primary contact (280 = non-primary)
+    ("deals", "companies"): 5,  # deal → primary company (341 = non-primary)
+    ("companies", "deals"): 6,  # primary company → deal (342 = non-primary)
+    ("deals", "contacts"): 3,  # symmetric, no primary variant
+    ("contacts", "deals"): 4,
+}
+
+# Association batch limits differ from the object batch limit of 100.
+ASSOCIATION_BATCH_LIMIT = 100
+
+
+@dataclass
+class AssociationRequest:
+    """One association to create, addressed by the objects' HubSpot record ids."""
+
+    from_id: str
+    to_id: str
+
 DEAL_STAGE_MAP = {
     "discovery": "appointmentscheduled",
     "evaluation": "qualifiedtobuy",
@@ -196,6 +224,46 @@ class DemoHubSpotAdapter:
         self.db.flush()
         return out
 
+    def associate(self, from_type: str, to_type: str, pairs: list[AssociationRequest]) -> BatchOutcome:
+        """Mirror HubSpot's association model in the simulated store, including idempotency.
+
+        Creating the same association twice in HubSpot is a no-op rather than a duplicate, so the demo
+        adapter behaves the same way — otherwise a replayed sync would look like it worked here and
+        break against the real thing.
+        """
+        type_id = ASSOCIATION_TYPES.get((from_type, to_type))
+        out = BatchOutcome()
+        if type_id is None:
+            out.results.extend(
+                UpsertResult(uuid.UUID(int=0), "failed", error=f"no association type for {from_type}→{to_type}")
+                for _ in pairs
+            )
+            return out
+        out.http_calls += 1
+        by_id = {
+            o.external_id: o
+            for o in self.db.scalars(
+                select(SimulatedCrmObject).where(
+                    SimulatedCrmObject.workspace_id == self.workspace_id,
+                    SimulatedCrmObject.object_type == from_type,
+                    SimulatedCrmObject.external_id.in_([p.from_id for p in pairs]),
+                )
+            )
+        }
+        for pair in pairs:
+            obj = by_id.get(pair.from_id)
+            if obj is None:
+                out.results.append(
+                    UpsertResult(uuid.UUID(int=0), "failed", error=f"{from_type} {pair.from_id} not found")
+                )
+                continue
+            link = {"to_type": to_type, "to_external_id": pair.to_id, "type_id": type_id}
+            if link not in (obj.associations or []):
+                obj.associations = [*(obj.associations or []), link]
+            out.results.append(UpsertResult(uuid.UUID(int=0), "updated", pair.to_id))
+        self.db.flush()
+        return out
+
 
 # --------------------------------------------------------------------------------------------------
 # Real adapter
@@ -284,6 +352,50 @@ class RealHubSpotAdapter:
                 retryable = resp.status_code == 429 or resp.status_code >= 500
                 msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
                 out.results.extend(UpsertResult(r.internal_id, "failed", error=msg, retryable=retryable) for r in batch)
+        return out
+
+
+    def associate(self, from_type: str, to_type: str, pairs: list[AssociationRequest]) -> BatchOutcome:
+        """Create HubSpot-defined associations in batches.
+
+        Uses `batch/create` with an explicit type rather than `batch/associate/default`, because the
+        default endpoint picks the association type for you and GTMOS has an opinion about which one
+        it wants (see ASSOCIATION_TYPES).
+
+        Associations are created *after* both objects exist, and the caller passes HubSpot record ids
+        returned by the upsert — not GTMOS ids. Associating by a custom unique property is not
+        supported by the v4 association API.
+        """
+        type_id = ASSOCIATION_TYPES.get((from_type, to_type))
+        out = BatchOutcome()
+        if type_id is None:
+            out.results.extend(
+                UpsertResult(uuid.UUID(int=0), "failed", error=f"no association type for {from_type}→{to_type}")
+                for _ in pairs
+            )
+            return out
+        for i in range(0, len(pairs), ASSOCIATION_BATCH_LIMIT):
+            batch = pairs[i : i + ASSOCIATION_BATCH_LIMIT]
+            payload = {
+                "inputs": [
+                    {
+                        "from": {"id": p.from_id},
+                        "to": {"id": p.to_id},
+                        "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": type_id}],
+                    }
+                    for p in batch
+                ]
+            }
+            resp = self._post(f"/crm/v4/associations/{from_type}/{to_type}/batch/create", payload)
+            out.http_calls += 1
+            if resp.status_code in (200, 201, 207):
+                out.results.extend(UpsertResult(uuid.UUID(int=0), "updated", p.to_id) for p in batch)
+            else:
+                retryable = resp.status_code == 429 or resp.status_code >= 500
+                msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                out.results.extend(
+                    UpsertResult(uuid.UUID(int=0), "failed", error=msg, retryable=retryable) for _ in batch
+                )
         return out
 
 

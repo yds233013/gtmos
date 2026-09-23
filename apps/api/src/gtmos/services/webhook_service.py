@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gtmos.config import get_settings
-from gtmos.integrations.signatures import verify_gtmos, verify_hubspot_v3, verify_token
+from gtmos.integrations.signatures import verify_gtmos, verify_hubspot, verify_token
 from gtmos.models import WebhookEvent
 from gtmos.services.common import correlation_id, utcnow
 
@@ -37,13 +37,15 @@ def verify_request(
         secret = s.hubspot_webhook_client_secret
         if secret is None:
             return VerifyResult("not_configured", "HUBSPOT_WEBHOOK_CLIENT_SECRET not set")
-        ok, why = verify_hubspot_v3(
+        ok, why = verify_hubspot(
             secret.get_secret_value(),
             method,
             uri,
             body,
-            h.get("x-hubspot-signature-v3"),
-            h.get("x-hubspot-request-timestamp"),
+            signature_v3=h.get("x-hubspot-signature-v3"),
+            timestamp_ms=h.get("x-hubspot-request-timestamp"),
+            signature_v1_or_v2=h.get("x-hubspot-signature"),
+            signature_version=h.get("x-hubspot-signature-version"),
         )
         return VerifyResult("valid" if ok else "invalid", why)
     if s.webhook_secret is None:
