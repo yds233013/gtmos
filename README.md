@@ -249,19 +249,24 @@ make check          # everything above + production web build
 
 | Suite | Count | What it covers |
 |---|---|---|
-| Backend unit (pytest) | 57 | Scoring, waterfall, routing conflicts, committee, experiments and attribution math, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures |
-| Backend integration (pytest + Postgres) | 67 | API contracts, signal → workflow → draft → CRM, idempotency, retries → dead letter → resume, signed webhooks and replay protection, PQL flow, reverse-ETL idempotency, data quality merges, copilot routing, admin-token gating |
+| Backend unit (pytest) | 114 | Scoring including disqualifying signals, the enrichment waterfall and its conflict policy, routing conflicts/round robin/SLAs, committee, experiment and attribution maths, evaluation statistics against hand-computed cases, the content-evaluation graders against a deliberately broken writer, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures |
+| Backend integration (pytest + Postgres) | 184 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating |
 | Frontend (Vitest + Testing Library) | 14 | Formatters, safe markdown (HTML injection), URL helpers, accessible meters, confirm-before-mutate, inline API errors |
 | E2E (Playwright, production build) | 22 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
 
-Bugs found by these tests and fixed with regression tests include: a waterfall cache miss across positions, an
-unsigned delivery blocking a later valid signed delivery (idempotency-key poisoning), Wilson interval float
-residue, and evidence refs failing the numbers guardrail.
+Bugs found by these tests and fixed with regression tests include: a waterfall cache miss across positions; an
+unsigned delivery blocking a later valid signed delivery (idempotency-key poisoning); **HubSpot retries never
+deduplicating at all**, because its payload is a JSON array with an incrementing `attemptNumber` so every
+retry hashed differently; an invalid signature returning `200` for a known event id; **two workers executing
+the same workflow run** and duplicating every side effect; a crashed run never being re-enqueued; Data Quality
+sorting a page rather than the table, so an older high-severity issue could never reach the top; the Copilot
+answering "what's the churn rate" with a meeting-rate number; and untrusted signal text being copied verbatim
+into research reports.
 
 ## Screenshots
 
-`docs/screenshots/` is generated from the production build by `apps/web/scripts/screenshots.mjs`
-(`node scripts/screenshots.mjs http://127.0.0.1:3011`).
+[`docs/screenshots.md`](docs/screenshots.md) is the annotated tour, with a note on each image saying what to
+look at. All of it is the DEMO dataset.
 
 ## Design decisions
 

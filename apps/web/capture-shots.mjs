@@ -20,10 +20,10 @@ const PAGES = [
   { file: "06-pipeline", url: "/pipeline", heading: null, full: true },
   { file: "07-experiments", url: "/experiments", heading: null, full: true },
   { file: "08-experiment-provocative-subject", url: "/experiments/provocative-subject", heading: null, full: true },
-  { file: "09-routing", url: "/routing", heading: null, full: true },
-  { file: "10-workflows", url: "/workflows", heading: null, full: true },
-  { file: "11-data-quality", url: "/data-quality", heading: null, full: true },
-  { file: "12-stack-inspector", url: "/stack-inspector", heading: null, full: true },
+  { file: "09-routing", url: "/routing", heading: null, full: false, vh: 2400 },
+  { file: "10-workflows", url: "/workflows", heading: null, full: false, vh: 1800 },
+  { file: "11-data-quality", url: "/data-quality", heading: null, full: false, vh: 2400 },
+  { file: "12-stack-inspector", url: "/stack-inspector", heading: null, full: false, vh: 3750 },
   { file: "13-approvals", url: "/approvals", heading: null, full: true },
   { file: "14-copilot", url: "/copilot", heading: null, full: true },
   { file: "15-settings-controls", url: "/settings?tab=controls", heading: null, full: true },
@@ -89,7 +89,15 @@ const page = await ctx.newPage();
 const report = [];
 for (const p of PAGES) {
   if (ONLY && !p.file.includes(ONLY)) continue;
+  await page.setViewportSize({ width: 1440, height: p.vh ?? 900 });
   await page.goto(p.url, { waitUntil: "domcontentloaded" });
+  if (p.file.includes("copilot")) {
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.getByPlaceholder(/why did pipeline fall/i).fill("Which segment has the highest meeting conversion?");
+    await page.getByRole("button", { name: /^ask$/i }).click();
+    await page.getByText(/highest meeting rate/i).first().waitFor({ timeout: 20000 });
+    await page.waitForTimeout(800);
+  }
   await settle(page);
   const info = await inspect(page);
   const full = p.full && !VIEWPORT_ONLY.has(p.file);
