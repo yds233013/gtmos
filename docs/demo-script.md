@@ -13,7 +13,7 @@ PostHog are contracts exercised locally. Section 8 shows the product saying exac
 
 - Point at the **DEMO banner**: synthetic data, simulated CRM, deterministic AI mode, nothing is ever sent.
 - Stat row: accounts, ICP accounts, meetings, pipeline created, open pipeline, won revenue, all computed live.
-- **Act now**: the highest-intent A/B accounts. Note one is **Unowned**; we'll see why later (routing gap).
+- **Act now**: the highest-intent A/B accounts, each with its owner and latest signal. Every A/B account currently has an owner — the routing gap this dataset still carries is a *territory* gap, not an ownership one, and the Stack Inspector traces it.
 - **Does the score predict outcomes?** Meeting rate by grade among contacted accounts. Mention the caveat
   printed under it (engagement feeds the score, so a holdout backtest is the honest next step).
 
@@ -21,7 +21,7 @@ PostHog are contracts exercised locally. Section 8 shows the product saying exac
 
 - Header: A-grade 98, owner Sam Okoro (senior AE), stage Opportunity.
 - **Why this score**: Fit 35/35, Intent 25/25 (capped), Timing 13/15, Technical 15/15, Engagement 10/10.
-  Read one intent line aloud: *"14 open AI/ML roles, observed 6 days ago… 45-day half-life → 88% of 10 pts."*
+  Read one intent line aloud: *"14 open AI/ML roles, 92% confidence, 45-day half-life → 89% of 10 pts", which is 8.8 of 10.*
   Every point is a rule with evidence. The input hash makes it reproducible.
 - **Company data & provenance**: each field shows provider, confidence and timestamp. Demo providers are
   labeled.
@@ -56,8 +56,8 @@ PostHog are contracts exercised locally. Section 8 shows the product saying exac
 - Open a **dead-letter** run from history (labeled synthetic): the failing step, the exhausted attempts, the
   retry button (disabled for synthetic history).
 - **Routing → simulator**: Enterprise NA, ICP 86, intent 72 → *Senior AE* wins over the territory rule
-  ("lost: lower priority (30 vs 20)"). Switch region to **APAC** → *No routing rule matched*. That's the
-  unowned account from step 1.
+  ("lost: lower priority (30 vs 20)"). Switch region to **APAC** → *No routing rule matched*, which is the
+  fallback path an account takes when no territory covers it.
 
 ## 6. Did it work? (1.5 min)
 
