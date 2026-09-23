@@ -337,7 +337,13 @@ def _chain_size_gap(
         "Missing employee count → no segment → no routing rule → no territory owner",
         "Employee count missing",
         no_size,
-        "{n} live accounts have no employee count.",
+        # Deliberately a different number from the `missing_employee_count` data-quality rule, which
+        # additionally requires a domain because its remediation is "run the enrichment waterfall" and
+        # there is nothing to enrich without one. Two true numbers about different sets is exactly the
+        # trap this page exists to avoid, so the sentence names the gap instead of leaving a reader to
+        # find two figures and distrust both.
+        "{n} live accounts have no employee count. The data-quality rule counts fewer, because it only "
+        "raises the ones that have a domain to enrich; the rest cannot be fixed by enrichment at all.",
         "accounts where employee_count is null and merged_into_id is null",
     )
     chain.step(
