@@ -71,7 +71,35 @@ same reasoning that makes the PQL fire once per account per week (`domain/pql.py
 because it is a queue-design change rather than a bug, and building it late in a phase without a
 test for the suppression window would be the wrong trade. Recorded here rather than quietly left.
 
-### 4 · Doc references render as paths, not links · Open, accepted
+### 4 · A draft's evidence can rot between drafting and approval · Open, found by accident
+
+Deleting two signals from the demo database — they were ad-hoc test artifacts that made the flagship
+account's timeline incoherent, a Series D twelve days after a Series C — exposed something real. Four
+persisted snapshots kept citing them:
+
+- the stored **score component**, whose explanation text named the signal and whose evidence rows
+  pointed at ids that no longer resolved;
+- the **research brief**;
+- six **message drafts**, five of them sitting in the queue marked `ready`;
+- the **audit log**, which is correct to keep — recording that a signal existed and was removed is
+  what an audit log is for.
+
+A rescore and a research regeneration cleared the first two. The drafts did not clear, and that is the
+part worth keeping. **A draft is a snapshot of an argument, and nothing re-validates that argument at
+approval time.** A rep could have approved a message whose cited evidence had been retracted — which is
+exactly the failure the evidence pack exists to prevent, arriving through the one door nobody watched.
+
+The guardrails run when the draft is generated. They should also run when it is approved, and a draft
+whose evidence no longer resolves should be blocked with that reason rather than sent. That is a real
+feature, not a cleanup: in a live system, signals get retracted by the vendor that supplied them,
+contacts unsubscribe, and a funding round gets corrected — all of which can happen while a draft sits
+in a queue. The staler the queue, the more this matters, and a queue with 727 ready drafts is stale by
+construction.
+
+Not built, because it needs a re-validation pass and a test for it, and shipping it untested at the end
+of a phase would be the wrong trade. The six stale drafts were removed so the demo is coherent.
+
+### 5 · Doc references render as paths, not links · Open, accepted
 
 Cards cite `docs/research/hubspot.md` in monospace rather than as a hyperlink. There is no repository
 URL configured anywhere in the project and inventing one would be worse than the plain path, which is

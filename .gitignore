@@ -47,3 +47,6 @@ warehouse/target/
 warehouse/dbt_packages/
 warehouse/logs/
 warehouse/.user.yml
+
+# Scratch capture/verification scripts. One of these was swept into a commit by `git add -A`.
+apps/web/tmp-*.mjs

@@ -80,19 +80,24 @@ Each of these was found deliberately and left open with a reason, not overlooked
 3. **The approval queue does not group by contact.** Four pending drafts for the same person, two
    identically titled, is the noise the queue exists to prevent. Needs a suppression window per contact
    per draft type, plus a test for it.
-4. **No inbound rate limiting.** Deliberate: in production this belongs at the edge, and a naive
+4. **A draft's cited evidence is never re-validated at approval time.** The guardrails run when a
+   draft is generated, not when a human approves it, so a signal retracted while the draft sat in the
+   queue leaves a message citing evidence that no longer resolves. Found by accident when cleaning up
+   test data — see finding 4 in `docs/phase3-product-review.md`. This is the most interesting open
+   item in the list, because it is a GTM problem rather than a software one.
+5. **No inbound rate limiting.** Deliberate: in production this belongs at the edge, and a naive
    in-process limiter gives false confidence across workers.
-5. **The admin gate is a no-op in demo mode**, along with roughly thirty ungated mutating routes.
+6. **The admin gate is a no-op in demo mode**, along with roughly thirty ungated mutating routes.
    Defensible for an openable demo; written up as Finding 4 in `docs/security-review.md` rather than
    covered by a scoping sentence.
-6. **The audit actor is caller-asserted** (`X-GTMOS-Actor`), so the trail is a change log with a name on
+7. **The audit actor is caller-asserted** (`X-GTMOS-Actor`), so the trail is a change log with a name on
    it. Finding 5, same document.
-7. **Routing rules and workflow definitions are not editable in the product.** The ICP is the only thing
+8. **Routing rules and workflow definitions are not editable in the product.** The ICP is the only thing
    an operator can change. The architecture argues the n8n split exists so operators can work without a
    deploy — and then the operator cannot change a territory or an SLA without one. This is the sharpest
    unanswered question in the project.
-8. **No supply-chain scanning.**
-9. **Every evaluation runs on synthetic data.** The matcher's held-out set is 116 cases, which cannot
+9. **No supply-chain scanning.**
+10. **Every evaluation runs on synthetic data.** The matcher's held-out set is 116 cases, which cannot
    distinguish 0.96 precision from 0.90, and `docs/matcher-evaluation.md` says so in its own headline.
 
 ## 7 · Two things only you can decide
