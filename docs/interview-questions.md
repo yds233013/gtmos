@@ -18,7 +18,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 - **Conflict resolution** (`domain/routing.py::_sort_key`): the lowest priority number wins, then the more specific rule (more conditions), then the rule key alphabetically. Losing rules are recorded with their reason, for example "lower priority (30 vs 20)".
 - **Ownership.** An active owner is kept unless the winning rule has `overrides_existing_owner`. An inactive owner triggers reassignment. An inactive named assignee falls back to their team's pool.
 - **Distribution.** Least-loaded by `load / capacity` where capacity differs; round robin where it does not. Round robin hashes the account id over a sorted pool instead of keeping a shared counter: a counter gives exact balance but needs a lock and sends the same account to a different rep depending on when it ran, while hashing is idempotent across a replay. When a whole pool is at capacity the account is still assigned and a capacity alert is raised, so it never gets dropped.
-- **A fallback queue, not a shrug.** One rule is marked `is_fallback` and is evaluated last whatever its priority, so accounts no territory rule claims go to RevOps triage. `unmatched` now means only that no queue is configured — a gap in the rule set, and the explanation says so. *Demo:* the Stack Inspector traces 71 accounts in regions no active rule names, falling through to triage because the seed has no APAC rule.
+- **A fallback queue, not a shrug.** One rule is marked `is_fallback` and is evaluated last whatever its priority, so accounts no territory rule claims go to RevOps triage. `unmatched` now means only that no queue is configured — a gap in the rule set, and the explanation says so. *Demo:* the Stack Inspector traces 87 accounts in regions no active rule names, falling through to triage because the seed has no APAC rule.
 - **Speed to lead.** Each rule carries an SLA (4h for a high-intent strategic account, 72h for triage) that becomes a due-by timestamp on the decision. The report measures against the first real outbound touch, counts only genuine lead events — a territory reshuffle assigns thousands at once and starts no clock — and separates *late* from *never touched*, because only one of those is a process problem. *Demo:* 655 assignments, 84% met, 98 late, 9 never touched, median 4.1 hours.
 - **Logging.** Every decision is a `RoutingDecision` with matched rules, the conditions that passed or failed with their actual values, conflicts, the explanation, and latency from the triggering signal (`services/routing_service.py`). A simulator runs the same function without applying the result.
 
@@ -44,7 +44,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Specifics.**
 - GTMOS owns the computed `gtmos_*` properties (score, grade, tier, last signal, next best action). The reverse-ETL job overwrites them on change.
 - Rep-owned fields (owner edits, notes, deal stage in the CRM) belong to the CRM.
-- The inbound HubSpot webhook (`api/routes/integrations.py::webhook_hubspot`) verifies the v3 signature, stores the event and acknowledges it, but applies nothing ("GTMOS-owned gtmos_* properties are never overwritten"). A rep who manually edits `gtmos_icp_score` is overwritten on the next change, and the edit is visible in the event log.
+- The inbound HubSpot webhook (`api/routes/integrations.py::webhook_hubspot`) verifies the signature — preferring v3, falling back to the **v1** scheme that private apps actually send — then stores the event and acknowledges it, but applies nothing ("GTMOS-owned gtmos_* properties are never overwritten"). A rep who manually edits `gtmos_icp_score` is overwritten on the next change, and the edit is visible in the event log.
 - For enrichment fields, the provenance and manual-lock model (`FieldProvenance.is_manual_lock`) means a rep's correction beats any provider.
 - Change detection compares against `ExternalRecord.last_payload_hash` for what GTMOS last pushed, not the live CRM value. A CRM-side edit to a `gtmos_*` field is therefore not re-pushed until the underlying value changes.
 
@@ -89,7 +89,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Thesis.** A signal is a timestamped, sourced, confidence-weighted fact tied to an account. Detection is ingestion plus resolution plus deduplication plus decay. The source matters less than that pipeline.
 
 **Specifics.**
-- **Catalog.** 13 types (`domain/signals.py`) across first-party (product events, pricing visits), third-party (funding, executive hires, AI hiring surges, job postings that name the problem, tech adoption, launches) and engagement. Each type has a half-life from 14 to 120 days.
+- **Catalog.** 19 types (`domain/signals.py`), six of them disqualifying across first-party (product events, pricing visits), third-party (funding, executive hires, AI hiring surges, job postings that name the problem, tech adoption, launches) and engagement. Each type has a half-life from 14 to 120 days.
 - **Pipeline** (`services/signal_service.py`): validate → dedupe on `hash(type, domain, source_ref)` (unique in Postgres) → persist with evidence and source URL → rescore → emit `signal.created` to workflows.
 - **Thresholding.** Some signals are thresholds, not events. Pricing views become a signal only at 2 or more in 7 days, and at most one per account-week (`services/product_events.py`).
 - **Validation.** `analytics.signal_correlation` compares opportunity rates for accounts with and without each signal. *Demo:* pricing-page activity 14.1% vs 5.8% baseline. The endpoint states the caveat that signal-triggered campaigns also target these accounts.
@@ -127,7 +127,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Specifics.**
 1. **Decompose by source.** `analytics.period_comparison` splits opportunities created by source campaign, current vs previous period. *Demo, 28 days:* total pipeline actually rose ($1.99M vs $1.22M), but the funding-trigger campaign fell from $391k to $121k after it ended, and PLG fell $180k. Agent-launch outreach (+$804k) masked both.
 2. **Volume vs conversion.** Did sends drop, or did reply → meeting → opportunity rates drop? The funnel and breakdown endpoints answer this by segment, region, persona and grade.
-3. **Plumbing.** Look for routing gaps (71 accounts in uncovered territories), PQL leakage (41 of 44 PQAs untouched within 3 days), dead-lettered workflows (14), failed syncs, and stale enrichment that drops accounts out of the ICP.
+3. **Plumbing.** Look for routing gaps (87 accounts in uncovered territories), PQL leakage (41 of 44 PQAs untouched within 3 days), dead-lettered workflows (19), failed syncs, and stale enrichment that drops accounts out of the ICP.
 4. **Data artifacts.** Invalid stage transitions and lifecycle conflicts distort funnel metrics.
 
 The Copilot routes "Why did pipeline fall?" to exactly these approved analyses (`services/copilot.py`, the `pipeline_change` intent). No LLM writes SQL.

@@ -187,7 +187,7 @@ Every decision is saved as a `RoutingDecision` with matched rules, conflicts, th
 - Only **lead events** start a clock — signal, inbound, PQL, workflow, manual. A territory reshuffle assigns thousands of accounts at once and is not a response to anything; counting those would turn the metric into a measure of list size that every team fails.
 - Four states, not two: **met**, **late**, **never touched** and **pending**. An assignment whose SLA has not elapsed is not a miss, and a late touch is a process problem while no touch at all is a leak. Collapsing those loses the one that costs money.
 
-*Demo:* Kestrel matched both "High-intent strategic → Senior AE" (priority 20) and "Enterprise NA → Enterprise AE pool" (priority 30). The first won on priority and the conflict is logged. Over 90 days, 655 lead-event assignments carry an SLA: 84% met, 98 late, 9 never touched, median 4.1 hours. The nine are accounts where a signal fired and nobody followed up — which is exactly what the report exists to find. The Stack Inspector traces a separate territory gap: 71 accounts in regions no active rule names fall through to triage.
+*Demo:* Kestrel matched both "High-intent strategic → Senior AE" (priority 20) and "Enterprise NA → Enterprise AE pool" (priority 30). The first won on priority and the conflict is logged. Over 90 days, 655 lead-event assignments carry an SLA: 84% met, 98 late, 9 never touched, median 4.1 hours. The nine are accounts where a signal fired and nobody followed up — which is exactly what the report exists to find. The Stack Inspector traces a separate territory gap: 87 accounts in regions no active rule names fall through to triage.
 
 **Production would add.** Working hours and PTO so an SLA does not run overnight, escalation when one breaches, true round-robin with a last-assigned timestamp where exact balance matters more than idempotency, account-based routing for leads (route to the account owner), and a rule-change dry run over historical decisions.
 
@@ -281,7 +281,7 @@ Downstream, idempotency is layered: signals have dedupe keys, workflow runs have
 - **Resume.** `retry_run` resumes at the failed step and skips steps that already succeeded.
 - **Execution.** Runs execute inline, or on Redis/RQ after the transaction commits (`worker.py`). A sweeper re-enqueues runs stuck in `queued`, so Postgres stays the source of truth.
 
-*Demo:* The Operations page shows 14 dead-lettered runs (for example "retries exhausted: 503 Service Unavailable from sync_crm (simulated)"). This run history is seeded (`synthetic_history: true`).
+*Demo:* The Operations page shows 19 dead-lettered runs (for example "retries exhausted: 503 Service Unavailable from sync_crm (simulated)"). This run history is seeded (`synthetic_history: true`).
 
 **Production would add.** A durable orchestrator (Temporal, or Inngest-style step functions), per-action rate limits, alerting on dead-letter growth, a visual editor, and workflow versioning with migration of in-flight runs.
 
