@@ -159,7 +159,7 @@ Reports are stored as drafts with `prompt_version` and an input hash, and they a
 
 Free-mail domains (gmail.com and 18 others) never match. `normalize_domain` strips protocol, `www.`, path, port and case. Unmatched events are stored as `Engagement` rows with no account rather than dropped.
 
-**Production would add.** Fuzzy company-name matching, IP-to-company resolution (reverse IP), enrichment-provider firmographic IDs, a labeled fixture set with reported precision and recall, and a manual review queue for low-confidence matches (the LeanData pattern).
+**Since added** (Phase 3): a 6-tier matching waterfall, a 219-case labelled fixture with a held-out test split, and a review queue for low-confidence matches — see `docs/matcher-evaluation.md`. **Production would still add** other fuzzy signals, IP-to-company resolution (reverse IP), enrichment-provider firmographic IDs, a labeled fixture set with reported precision and recall, and a manual review queue for low-confidence matches (the LeanData pattern).
 
 ---
 

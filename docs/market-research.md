@@ -124,7 +124,7 @@ These are mapped to what hiring managers ask for. Each bullet should become a sp
 - **G1 Idempotent CRM upsert adapter:** batch upsert to HubSpot using a custom unique `idProperty` (not `domain`), capped at 100 per batch, with 429 handling driven by `X-HubSpot-RateLimit-*` headers, and a dry-run diff mode.
 - **G2 Signed webhook ingestion:** HubSpot v3 signature verification (HMAC-SHA256, base64, 5-minute replay window), raw event store, dedupe on event ID, async worker, dead-letter queue and replay.
 - **G3 Enrichment waterfall:** pluggable providers (Apollo plus mocks), per-field stop conditions, validation, cost/credit accounting per record, caching, and provenance for every field.
-- **G4 Lead-to-account matching:** domain normalisation, a free-mail blocklist, fuzzy name fallback, a confidence score, and a test fixture set with precision/recall reported.
+- **G4 Lead-to-account matching:** domain normalisation, a free-mail blocklist, fuzzy name fallback, a confidence score, and a test fixture set with precision/recall reported. *(Built — see `docs/matcher-evaluation.md`.)*
 - **G5 Routing engine:** declarative rules (owner, territory, then round robin), tie-breakers, capacity limits, SLA timers, and an explainable "why routed" log.
 - **G6 Signal ingestion and scoring:** PostHog events with `$groups` for company-level signals, fit plus intent scores with decay, threshold-triggered actions, and score explanations.
 - **G7 Warehouse as source of truth and reverse ETL:** a SQL model with a primary key, sync modes (upsert/update/mirror), field mapping config, CDC diffing and reconciliation reports.

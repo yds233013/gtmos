@@ -7,8 +7,11 @@ ordered by how much each key can be trusted, and it prefers returning nothing to
 every tier is precision-first, ambiguity is an explicit non-answer, and rejected candidates come back with
 the match so a human reviewing a queue can see what was considered.
 
-The accuracy claim lives in `tests/unit/test_rules_pipeline_matching.py`, which scores the matcher against
-a labelled fixture of hard cases and asserts a precision and recall floor.
+The accuracy claim lives in `docs/matcher-evaluation.md`. The labelled data behind it is in
+`matching_fixtures.py`, split deterministically into a development half that the fuzzy threshold was tuned
+on and a held-out half that it was not; `tests/unit/test_matching_evaluation.py` re-derives both. The
+earlier version of this module tuned and reported on one 36-case fixture, which made its precision and
+recall in-sample and therefore optimistic; nothing in this file should be tuned against the held-out split.
 """
 
 from __future__ import annotations
@@ -253,11 +256,14 @@ def match_to_account(
 
 # The full lead-to-account waterfall ---------------------------------------------------------------------
 
-# Tuned on the labelled fixture in tests/unit/test_rules_pipeline_matching.py, which makes the reported
-# precision and recall in-sample. It is set above the highest-scoring known negative pair in that fixture
-# ("Acme Data" vs "Acme Analytics"-shaped near-duplicates) rather than at the point that maximises F1,
-# because a wrong account is more expensive than no account: a wrong one routes to the wrong rep silently.
-FUZZY_NAME_THRESHOLD = 0.86
+# Tuned on the *development* half of the labelled set in `matching_fixtures.py` and never on the held-out
+# half, which is what makes the numbers in docs/matcher-evaluation.md a measurement rather than a
+# restatement of the tuning. The selection rule was fixed before the curve was drawn: maximise F0.5, so
+# precision counts double, because a wrong account routes the wrong rep to a real customer and nothing
+# raises, while a miss lands in an unmatched queue somebody already reads. Dev cannot separate 0.85, 0.86
+# and 0.87 — they make identical decisions on those 103 cases — and the tie is broken upward, toward the
+# threshold that guesses least. Do not re-tune this against the held-out split.
+FUZZY_NAME_THRESHOLD = 0.87
 # Below this many characters a fuzzy score is noise: "Nexa" and "Nexo" are 75% similar and unrelated.
 MIN_FUZZY_NAME_CHARS = 6
 # Near-misses worth showing a human in a review queue, even though they were not matched.
@@ -347,7 +353,11 @@ def _lead_domains(lead: Lead) -> tuple[list[tuple[str, str, float]], str | None]
     return out, note
 
 
-def match_lead_to_account(lead: Lead, accounts: Sequence[AccountRef]) -> LeadMatch:
+def match_lead_to_account(
+    lead: Lead,
+    accounts: Sequence[AccountRef],
+    fuzzy_threshold: float = FUZZY_NAME_THRESHOLD,
+) -> LeadMatch:
     """Resolve a lead to one account, or to nothing, with the method and the candidates it turned down.
 
     The waterfall, strongest key first:
@@ -359,7 +369,8 @@ def match_lead_to_account(lead: Lead, accounts: Sequence[AccountRef]) -> LeadMat
     4. **Brand label across TLDs.** `kestrel.de` to `kestrel.example`, but only when exactly one account
        claims that label — this is the weakest domain key and the easiest to get wrong.
     5. **Normalized company name**, including aliases (DBA and acquired-brand names).
-    6. **Fuzzy company name** above `FUZZY_NAME_THRESHOLD`.
+    6. **Fuzzy company name** above `fuzzy_threshold` (default `FUZZY_NAME_THRESHOLD`; the parameter exists
+       so the evaluation harness can sweep it on a development split without patching a module global).
 
     Two rules apply at every tier. A tier that produces more than one candidate returns no match with
     `method="ambiguous"` and flags the lead for review, because picking one of two equally good accounts is
@@ -456,13 +467,13 @@ def match_lead_to_account(lead: Lead, accounts: Sequence[AccountRef]) -> LeadMat
         key=lambda t: (-t[0], t[1].account.key),
     )
     best = scored[0] if scored else None
-    if best and best[0] >= FUZZY_NAME_THRESHOLD and len(name) >= MIN_FUZZY_NAME_CHARS:
+    if best and best[0] >= fuzzy_threshold and len(name) >= MIN_FUZZY_NAME_CHARS:
         runner_up = scored[1][0] if len(scored) > 1 else 0.0
-        if runner_up >= FUZZY_NAME_THRESHOLD:
-            return ambiguous([s[1] for s in scored if s[0] >= FUZZY_NAME_THRESHOLD], "fuzzy_name", f"Name '{name}'")
+        if runner_up >= fuzzy_threshold:
+            return ambiguous([s[1] for s in scored if s[0] >= fuzzy_threshold], "fuzzy_name", f"Name '{name}'")
         # Confidence tracks how far past the threshold the score is, capped below the exact-name tier: a
         # fuzzy match is never as good as an exact one, however similar the strings happen to be.
-        conf = round(min(0.75, 0.55 + 0.3 * (best[0] - FUZZY_NAME_THRESHOLD) / (1 - FUZZY_NAME_THRESHOLD)), 2)
+        conf = round(min(0.75, 0.55 + 0.3 * (best[0] - fuzzy_threshold) / (1 - fuzzy_threshold)), 2)
         rejected.extend(
             RejectedCandidate(i.account.key, "fuzzy_name", round(s, 3), "scored lower than the chosen account")
             for s, i in scored[1:4]
@@ -473,12 +484,12 @@ def match_lead_to_account(lead: Lead, accounts: Sequence[AccountRef]) -> LeadMat
             "fuzzy_name",
             conf,
             f"'{name}' is {best[0] * 100:.0f}% similar to '{best[1].names[0]}', over the "
-            f"{FUZZY_NAME_THRESHOLD * 100:.0f}% bar, and the next best is {runner_up * 100:.0f}%.",
+            f"{fuzzy_threshold * 100:.0f}% bar, and the next best is {runner_up * 100:.0f}%.",
             tuple(rejected),
             review_required=True,
         )
     rejected.extend(
-        RejectedCandidate(i.account.key, "fuzzy_name", round(s, 3), f"below the {FUZZY_NAME_THRESHOLD:.2f} name bar")
+        RejectedCandidate(i.account.key, "fuzzy_name", round(s, 3), f"below the {fuzzy_threshold:.2f} name bar")
         for s, i in scored[:3]
         if s >= NEAR_MISS_FLOOR
     )

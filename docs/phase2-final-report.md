@@ -191,8 +191,11 @@ All run immediately before writing this, in demo mode:
   from random on this dataset.
 - **No holdout**, so no causal claim about targeting is available — and the report says so rather than
   implying one.
-- **The matcher's precision and recall (0.960 / 0.923) are in-sample**: the fuzzy threshold was tuned on
-  the same 36-case fixture that measures it, and 36 cases is small.
+- **The matcher's precision and recall were in-sample** when this report was written: the fuzzy
+  threshold was tuned on the same 36-case fixture that measured it. **Fixed in Phase 3** — see
+  `docs/matcher-evaluation.md` for a 219-case dataset with a disjoint 103/116 dev/test split, held-out
+  results with confidence intervals, and an explicit statement that 116 cases is still not enough to
+  distinguish 0.96 from 0.90.
 - **Deliverability thresholds are industry rules of thumb**, not fitted to any business; only Google's
   complaint-rate numbers are published. Complaint and unsubscribe denominators are accounts rather than
   messages, which overstates risk.

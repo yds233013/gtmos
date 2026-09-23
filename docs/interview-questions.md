@@ -217,7 +217,7 @@ The Copilot routes "Why did pipeline fall?" to exactly these approved analyses (
 - **Normalization** strips protocol, `www.`, path, port and case.
 - **Unmatched events** are stored as `Engagement` rows without an account, and the Stack Inspector counts them.
 
-**Trade-offs.** No fuzzy name matching, no reverse-IP, and no precision/recall fixture set yet. The market research lists those as the next steps (`docs/market-research.md` §7, G4). I would also add a review queue for matches below 0.8.
+**Trade-offs.** No reverse-IP resolution. Fuzzy name matching and a measured fixture set now exist (`docs/matcher-evaluation.md`: 219 cases, disjoint dev/test split, held-out precision 0.962 with a 0.894–0.987 interval) — but the honest reading of that interval is that 116 held-out cases cannot distinguish 0.96 from 0.90, and the dataset is synthetic and labelled by its author. The market research lists those as the next steps (`docs/market-research.md` §7, G4). I would also add a review queue for matches below 0.8.
 
 ### 16. How do you handle a CRM migration (for example Salesforce to HubSpot)?
 
