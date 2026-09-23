@@ -9,7 +9,7 @@ WEB_PORT ?= 3010
 
 .PHONY: help setup dev-deps migrate seed reset backtest llm-eval golden-flow api worker web dev up down logs n8n \
         warehouse warehouse-refresh warehouse-docs \
-        test test-api test-unit test-web e2e lint typecheck format check clean
+        test test-api test-unit test-web e2e lint typecheck format check clean docs-numbers
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ reset: ## Wipe and reload the DEMO dataset
 
 backtest: ## Regenerate docs/scoring-backtest.md from the current dataset
 	cd $(API) && uv run python -m gtmos.backtest --out ../../docs/scoring-backtest.md
+
+docs-numbers: ## Regenerate docs/demo-numbers.md (routing SLA, experiment, data quality, deliverability)
+	cd $(API) && uv run python -m gtmos.demonumbers --out ../../docs/demo-numbers.md
 
 llm-eval: ## Grade the configured research writer against the golden set (no database, no network)
 	cd $(API) && uv run python -m gtmos.llmeval --out ../../docs/llm-eval-report.md

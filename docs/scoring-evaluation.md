@@ -122,15 +122,20 @@ never happens. Grade A held **one account in 2,006**: a band with no list in it.
 Bands exist to drive action — A: work today, B: sequence, C: nurture, D: leave alone — so the
 boundaries now come from the distribution and from how much a team can actually work:
 
-| | Old (80/65/50) | New (72/58/45) |
+| | Old (80/65/50) | New (72/58/45), as they stand today |
 | --- | --- | --- |
-| A | 1 account (0.05%) | 12 accounts (0.6%) — a day's list |
-| B | 64 (3.2%) | 189 (9.4%) — a quarter's list |
-| C | 571 (28.5%) | 679 (33.9%) |
-| D | 1,321 (65.9%) | 1,077 (53.7%) |
+| A | 1 account (0.05%) | 8 accounts (0.4%) — a day's list |
+| B | 64 (3.2%) | 204 (10.2%) — a quarter's list |
+| C | 571 (28.5%) | 639 (31.9%) |
+| D | 1,321 (65.9%) | 1,106 (55.1%) |
 
-(Band sizes moved slightly after disqualifying signals were added, because a penalty can drop an
-account out of a band. The shape — a workable A list and a B list a team can sequence — is the point.)
+The "New" column is the **current** distribution, regenerated from `docs/scoring-backtest.md`, not the
+distribution at the moment the thresholds were chosen. It has moved since: adding disqualifying signals
+roughly halved grade A, because a penalty can drop an account out of a band. Saying so matters more than
+the numbers do — the thresholds were set against one distribution and are being reported against another,
+and a table that quietly showed the old figures would be hiding exactly that.
+
+The shape is what the change was for: a workable A list, and a B list a team can sequence.
 
 The conversion ladder above was checked after the change and is monotonic for meetings. **That check is
 in-sample**: the same accounts that set the bands validated them, so it is a sanity check, not evidence

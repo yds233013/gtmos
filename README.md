@@ -75,8 +75,8 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
   verification, dedupe on event id, replayable failures. Rejected deliveries can't poison idempotency keys.
 - **Experiments that can say "do not ship".** Guardrail metrics (bounce, unsubscribe, spam complaint, negative
   reply) are evaluated one-sided for harm, and a breach outranks any win on the primary metric. The seeded
-  provocative-subject test lifts reply rate 21.8% → 40.5% and is still rejected, because unsubscribes go 0.35%
-  → 2.25%. A minimum detectable effect is reported with every result, so a null reads as "no effect" or
+  provocative-subject test lifts reply rate 20.7% → 37.0% and is still rejected, because unsubscribes go
+  0.00% → 2.90%, an interval that sits entirely above the 1% ceiling. A minimum detectable effect is reported with every result, so a null reads as "no effect" or
   "underpowered" rather than ambiguously.
 - **Routing with a clock.** Named accounts no rule can move, a fallback queue so nothing is simply unowned,
   round robin that stays idempotent across a replay, and a per-rule first-touch SLA. Speed to lead is measured
@@ -92,7 +92,7 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
   LLM-generated SQL, ever, and metrics GTMOS does not model (revenue, churn, NPS, CAC) are named as gaps
   instead of approximated by the nearest metric that shares a word.
 - **A warehouse layer.** A [dbt project](warehouse/) modelling the operational database into analytics marts,
-  with 19 models and 132 tests, checked against the API's semantic layer so the two cannot drift apart.
+  with 19 models and 113 tests, checked against the API's semantic layer so the two cannot drift apart.
 - **Evaluation for generated content.** `make llm-eval` grades whichever writer is configured against
   adversarial cases: invented citations, ungrounded numbers, banned superlatives, and instructions hidden in
   the evidence. It found a real one — untrusted feed text was being copied verbatim into research reports.
@@ -112,9 +112,9 @@ The fastest tour (≈10 minutes; full script in [`docs/demo-script.md`](docs/dem
 5. **Approvals**: guardrails, reasoning chain and evidence. Approve, or watch a fabricated metric get blocked.
 6. **Workflows → run detail**: step timeline, attempts, idempotency key and correlation id.
 7. **Routing → simulator**: see a high-intent enterprise account beat the territory rule and why.
-8. **Experiments**: open `provocative-subject`. The treatment wins reply rate by 18.7 percentage points with
-   p < 0.001 — and the recommendation is **do not ship**, because unsubscribes went 0.35% → 2.25% and negative
-   replies 3.1% → 11.3%. This is the page to spend time on: optimising reply rate alone is how teams burn a
+8. **Experiments**: open `provocative-subject`. The treatment wins reply rate by 16.3 percentage points with
+   p < 0.001 — and the recommendation is **do not ship**, because unsubscribes went 0.00% → 2.90% and negative
+   replies 2.6% → 10.1%. This is the page to spend time on: optimising reply rate alone is how teams burn a
    sending domain.
 9. **Data Quality → Stack Inspector → Copilot → Operations**: the system inspecting itself.
 
@@ -191,7 +191,7 @@ Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`
 |---|---|
 | **ICP** | Versioned, validated definition (industries, size bands, regions, technographics, personas, signal budgets, exclusions, weights); preview grade changes before saving |
 | **Enrichment** | Waterfall per field across providers with fallbacks, confidence thresholds, cost, provenance and merge policy |
-| **Signals** | 19 types across fit / intent / timing / technical / engagement, six of them negative, each with source, confidence, strength, evidence, dedupe key and half-life decay |
+| **Signals** | 19 types across intent / timing / engagement, six of them negative, each with source, confidence, strength, evidence, dedupe key and half-life decay |
 | **Scoring** | Explainable 100-point model; fit vs "why now" (intent index); A–D grades; exclusions |
 | **Routing** | Priority → specificity → key conflict resolution, ownership respect, inactive-owner reassignment, least-loaded pools with capacity |
 | **CRM** | Mini-CRM with funnel + deal stages, forward-only lifecycle, stage history, HubSpot object mapping |
@@ -224,7 +224,7 @@ is worse than one claiming none:
 
 | Integration | Status | What that means concretely |
 |---|---|---|
-| **n8n** | **Verified locally** | Runs in Docker, pinned to `n8nio/n8n:2.40.5`. Six workflows imported, published and **executed** against the running API. Deduplication proven: one batch delivered three times with different `attemptNumber` values yields one event with `duplicate_count` 0 → 1 → 2. The error workflow was proven by deliberately breaking another workflow. One workflow (`04`) calls `api.hubapi.com` and is reported as **not executed** for want of a token. See [`docs/n8n.md`](docs/n8n.md). |
+| **n8n** | **Verified locally** | Runs in Docker, pinned to `n8nio/n8n:2.40.5`. Six workflows imported and published; **five executed** against the running API. Deduplication proven: one batch delivered three times with different `attemptNumber` values yields one event with `duplicate_count` 0 → 1 → 2. The error workflow was proven by deliberately breaking another workflow. The sixth (`04`) calls `api.hubapi.com` and is reported as **not executed** for want of a token. See [`docs/n8n.md`](docs/n8n.md). |
 | **HubSpot CRM** | **Verified in simulation** · live **ready — needs credentials** | The demo adapter fully works: companies, contacts, deals and associations, batch upsert on a custom unique property, bounded retry, payload-hash change detection, inbound webhooks with v3 **and v1** signature verification. The live adapter is implemented against current documented APIs and has **never run against a real portal**. Setup: [`docs/hubspot-live-setup.md`](docs/hubspot-live-setup.md). |
 | **PostHog** | **Verified in simulation** · live **ready — needs credentials** | The inbound path is exercised continuously: PostHog-shaped events with `$groups.company` resolve to an account, become engagement rows, and feed a composite product-qualified rule. **No PostHog account exists**, so nothing has been received from real PostHog. Note that group analytics is a paid add-on. Setup: [`docs/posthog-live-setup.md`](docs/posthog-live-setup.md). |
 | **Clay** | **Ready — needs credentials** | Boundary built against Clay's documented Public API and signed-webhook contract, tested locally with `httpx.MockTransport` and recorded payloads. **Never run against a live Clay workspace**; no account exists and nothing was purchased. The API itself reports `verified_against_live_clay: false`. Setup: [`docs/clay-live-setup.md`](docs/clay-live-setup.md). |
@@ -283,9 +283,9 @@ make check          # everything above + production web build
 | Suite | Count | What it covers |
 |---|---|---|
 | Backend unit (pytest) | 210 | Scoring including disqualifying signals, the enrichment waterfall and its conflict policy, routing conflicts/round robin/SLAs, committee, experiment and attribution maths, evaluation statistics against hand-computed cases, the content-evaluation graders against a deliberately broken writer, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures including HubSpot's v1/v2/v3 schemes, the product-qualified rule, integration status derivation |
-| Backend integration (pytest + Postgres) | 251 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating, Clay ingestion and its prompt-injection sanitisation, permanently-invalid payloads rejected rather than retried, integration observability |
+| Backend integration (pytest + Postgres) | 255 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating, Clay ingestion and its prompt-injection sanitisation, permanently-invalid payloads rejected rather than retried, integration observability |
 | Frontend (Vitest + Testing Library) | 14 | Formatters, safe markdown (HTML injection), URL helpers, accessible meters, confirm-before-mutate, inline API errors |
-| E2E (Playwright, production build) | 22 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
+| E2E (Playwright, production build) | 25 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
 
 Bugs found by these tests and fixed with regression tests include: a waterfall cache miss across positions; an
 unsigned delivery blocking a later valid signed delivery (idempotency-key poisoning); **HubSpot retries never
@@ -337,15 +337,23 @@ push on are the places where GTMOS reports something inconvenient:
 |---|---|
 | "The score predicts conversion" | Structural AUC **0.537**, interval 0.485–0.589 — not distinguishable from random on this data. The leaking variant scores 0.593 and the report explains exactly why that number is contaminated. |
 | "Attribution shows what worked" | Four models, a deliberately **unattributed tail**, and a worked example where first-touch credits one campaign 100% and last-touch credits a different one 100% on the same deal. |
-| "Our best message won" | The winning subject line is recommended **against**, because it doubled unsubscribes while lifting replies. |
-| "Routing is solved" | 84% of lead-event assignments met their SLA; 98 were late and 9 were never touched at all. |
+| "Our best message won" | The winning subject line is recommended **against**: it lifts replies by **+16.3 pp** (p < 0.001) and takes unsubscribes from **0.00% to 2.90%**, whose whole interval sits above the 1% ceiling. |
+| "Routing is solved" | **78.7%** of decided lead-event assignments met their SLA; **106** were late and **22** were never touched at all — counted separately, because a late touch is a process problem and an untouched one is a leak. |
 | "The AI is grounded" | The evaluation harness found the generator copying attacker-supplied text out of a signal feed into a research report, and that is written up in [`docs/llm-evaluation.md`](docs/llm-evaluation.md). |
-| "The data is clean" | 499 open data-quality issues, including 18 fields where two providers materially disagree and GTMOS refused to pick a winner. |
+| "The data is clean" | **504** open data-quality issues, including **15** fields where two providers materially disagree and GTMOS refused to pick a winner. |
 | "Lead-to-account matching works" | Precision **0.962** on a held-out set — with a 0.894–0.987 interval and an explicit statement that 116 cases cannot distinguish that from 0.90. The threshold was tuned on a disjoint development set, and two held-out failures were left unfixed rather than burn the holdout. |
 | "The integrations are live" | One of four is verified by execution (n8n). The other three are honest about needing credentials, and the API reports `verified_against_live_clay: false` itself rather than leaving it to the README. |
 
-Every one of those numbers is computed from the demo dataset by code in this repository, and every one of them
-is reproducible with `make reset && make backtest`.
+Every one of those numbers is computed from the demo dataset by code in this repository. The scoring figures
+regenerate with `make backtest`, the matcher's with the held-out harness in `tests/`, and the routing, experiment,
+data-quality and deliverability figures with **`make docs-numbers`**, which writes
+[`docs/demo-numbers.md`](docs/demo-numbers.md).
+
+That last target exists because these four blocks were previously typed by hand, and a review found that four
+of them had drifted far enough that the README claimed the system was *better* than the running app showed —
+the SLA hit rate in particular. A project whose pitch is that it does not overstate cannot leave its headline
+figures unchecked, so they are generated now. If a number in prose disagrees with `docs/demo-numbers.md`, the
+generated file is right.
 
 ## Limitations
 
@@ -389,7 +397,8 @@ HubSpot, Clay, n8n and PostHog through this repository.
 [Clay](docs/clay-live-setup.md)
 
 **Evaluation and honesty**
-[Scoring evaluation](docs/scoring-evaluation.md) · [Scoring backtest](docs/scoring-backtest.md) ·
+[Demo numbers (generated)](docs/demo-numbers.md) · [Scoring evaluation](docs/scoring-evaluation.md) ·
+[Scoring backtest](docs/scoring-backtest.md) ·
 [Matcher evaluation](docs/matcher-evaluation.md) · [Content evaluation](docs/llm-evaluation.md) ·
 [Failure tournament](docs/failure-tournament.md) · [Security review](docs/security-review.md) ·
 [Product review](docs/phase3-product-review.md)

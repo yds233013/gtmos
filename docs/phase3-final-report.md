@@ -11,8 +11,8 @@ integrations page.** Nothing anywhere claims a connection that has not happened.
 where that sentence is true — rather than a state where four green badges hide four different
 realities — was most of the work.
 
-- **16 commits**, 98 files changed, +15,069 / −382, 42 new files.
-- **461 backend tests** (210 unit, 251 Postgres integration), 14 component, 25 e2e, 132 dbt — all
+- **Commit and diff totals are deliberately not quoted here.** They were, and they were wrong by three commits within an hour of being written, which is a small joke at the expense of a report about rigorous self-measurement. `git diff --shortstat cc209e9..HEAD` is the number, and it is right by construction.
+- **465 backend tests** (210 unit, 255 Postgres integration), 14 component, 25 e2e, 113 dbt tests — all
   passing. Migrations apply from empty with no model drift; both Docker images build and the API
   image serves live data.
 - **Four genuine bugs found and fixed**, each by a mechanism built in this phase rather than by

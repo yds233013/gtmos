@@ -75,11 +75,11 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
   a poisoned `industry` value produced a research brief repeating the injected instruction with a citation.
   The lesson generalises — a trust boundary is a property of where data comes from, not of which field it
   lands in, so adding an integration silently reclassifies fields that were previously safe.
-- Modelled the operational database into **analytics marts with dbt** (19 models, 132 tests) and verified the
+- Modelled the operational database into **analytics marts with dbt** (19 models, 113 tests) and verified the
   marts against the API's semantic layer so the two cannot silently drift.
 - Built a **GTM Stack Inspector** and data-quality engine (12 rules, audited remediation such as contact and
   account merges) that computes system health and ranks automation opportunities with traceable evidence.
-- Shipped with **461 backend tests** (210 unit + 251 Postgres integration), **14 component tests** and a
+- Shipped with **465 backend tests** (210 unit + 255 Postgres integration), **14 component tests** and a
   **25-test Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command
   Docker Compose stack.
 
@@ -88,7 +88,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 Built GTMOS, an AI-native GTM system (FastAPI/Postgres/Next.js) with explainable account scoring measured by
 an offline backtest, an enrichment waterfall that surfaces provider disagreement, idempotent workflows, a
 HubSpot reverse-ETL boundary, signed webhook ingestion, experiment guardrails that can reject a winning
-variant, and evidence-grounded AI outreach behind human approval; 500 automated tests.
+variant, and evidence-grounded AI outreach behind human approval; 504 automated tests.
 
 ## How to talk about scope honestly
 

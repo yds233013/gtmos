@@ -43,7 +43,7 @@ defensible, with the reason given; **Gap** = a real shortcoming, numbered and de
 | Out-of-order events (a later timestamp arriving first) | The older event is stored at its own `occurred_at`, but `account.last_signal_at` does not move backwards: `create_signal` only advances the high-water mark. History stays right; derived state does not regress. | Yes | `test_invariant_2_..._an_out_of_order_event_cannot_rewind_the_account_timeline` |
 | Unknown account domain | No account is created. The engagement is stored unattached (`account_id` NULL) and the response carries `match: "none"` with a reason naming the domain that failed to resolve. Recorded *and* surfaced, rather than dropped. | Yes | `test_a_product_event_from_an_unknown_domain_is_recorded_and_surfaced_without_inventing_an_account` |
 | Free-mail domain | Never matched. `match_to_account` drops the domain before the account lookup and says so in the reason; the lead matcher drops it as a company key entirely. No `gmail.com` account is created. | Yes | `test_a_free_mail_signup_is_never_matched_to_a_company_account`, unit `test_a_free_mail_address_is_never_matched_to_a_company` (4 providers), `test_a_free_mail_lead_with_no_company_name_is_an_unmatched_lead_not_a_guess` |
-| Malformed event (missing field, wrong types, 5 000-character event name) | Nothing is written — the processor runs inside a savepoint that rolls back — and the error says `invalid PostHog payload: N validation error(s)`. But the HTTP status is **202**, not 4xx. | **Gap 1** | `test_a_malformed_product_event_is_recorded_as_failed_with_a_useful_error_and_writes_nothing` (4 shapes), plus the `xfail` `test_a_malformed_product_event_should_be_answered_with_a_4xx` |
+| Malformed event (missing field, wrong types, 5 000-character event name) | Nothing is written — the processor runs inside a savepoint that rolls back — and the error says `invalid PostHog payload: N validation error(s)`, and the HTTP status is **422** with the delivery stored as `rejected`. | **Gap 1, fixed** | `test_a_malformed_product_event_is_recorded_as_failed_with_a_useful_error_and_writes_nothing` (4 shapes), plus `test_a_malformed_product_event_is_answered_with_a_4xx` |
 | Enormous body (1.1 MB) | Refused with 413 in the route, before the JSON parser and before any row is stored. | Yes | `test_an_oversized_delivery_is_refused_before_it_is_parsed_or_stored` |
 
 ### Transport (n8n and the shared signature path)
@@ -103,30 +103,30 @@ defensible, with the reason given; **Gap** = a real shortcoming, numbered and de
 
 ## Gaps
 
-### GAP-1 — a permanently invalid payload is answered 202, not 4xx
+### GAP-1 — a permanently invalid payload was answered 202, not 4xx · **fixed**
 
-**Where.** `apps/api/src/gtmos/services/webhook_service.py`, `_process` (lines 212–225) and `_finish`
-(line 209).
-
-**What breaks.** `_process` catches *every* processor exception and classifies it as a processing
-failure: `status = "failed"` (or `dead_letter` once `attempts >= MAX_ATTEMPTS`), and `_finish` maps
-anything that is not `processed` to HTTP 202. A payload that failed schema validation therefore gets
+**What it was.** `_process` caught *every* processor exception and classified it as a processing
+failure: `status = "failed"` (or `dead_letter` once `attempts >= MAX_ATTEMPTS`), and `_finish` mapped
+anything that was not `processed` to HTTP 202. A payload that failed schema validation therefore got
 the same answer as a payload that hit a transient database error: "accepted, we will retry". A sender
-with retry logic will re-send a body that can never succeed — three times, until it dead-letters — and
-an operator looking at the replay queue sees deliveries that are not worth replaying.
+with retry logic would re-send a body that can never succeed — three times, until it dead-lettered —
+and an operator looking at the replay queue saw deliveries that were not worth replaying. Nothing was
+ever written, so it was a reporting bug rather than a correctness bug, but it was the one place in the
+tournament where the observed behaviour was worse than the specified behaviour.
 
-Nothing is written, so this is a reporting bug rather than a correctness bug. It is the only place in
-the tournament where the observed behaviour is worse than the specified behaviour.
+**The fix, as shipped.** `webhook_service` now defines `PermanentError`. `_process` sets
+`status = "rejected"` for it — never `failed`, never retried — and `_finish` returns **422**.
+`_posthog_processor` and `_signal_processor` in `api/routes/integrations.py` raise it where they
+previously raised `ValueError`. The distinction the endpoint now makes is between "try again" and
+"this will never work", which it could not make before.
 
-**Suggested fix.** Give `webhook_service` a `PermanentError` that a processor may raise, have
-`_process` set `status = "rejected"` for it (never `failed`, never retried), and have `_finish` return
-422 in that case. `_posthog_processor` and `_signal_processor` in
-`apps/api/src/gtmos/api/routes/integrations.py` already catch `ValidationError` and re-raise
-`ValueError` — those two `raise` statements become `raise PermanentError(...)` and nothing else moves.
+**What the fix cost, and it is worth recording.** Three existing tests had pinned the buggy behaviour
+by asserting 202, and had to be updated. A suite can encode a bug as a guarantee, and the only thing
+that catches that is deciding what *should* happen before reading what does.
 
-**Pinned by.** `test_a_malformed_product_event_should_be_answered_with_a_4xx`, marked
-`@pytest.mark.xfail(strict=True)`. When the fix lands, the xfail turns into an unexpected pass and the
-suite fails until the marker is removed — which is the point.
+**Pinned by.** `test_a_malformed_product_event_is_answered_with_a_4xx` asserts 422 and that the stored
+delivery is `rejected`; the companion case asserts that a *transient* failure still answers 202, so the
+two paths cannot be collapsed again.
 
 ### GAP-2 — `rejected` deliveries are outside the replay path
 

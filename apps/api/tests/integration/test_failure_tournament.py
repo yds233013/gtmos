@@ -17,8 +17,9 @@ Five invariants are asserted by name, each in a test called `test_invariant_N_..
 
 `docs/failure-tournament.md` is the scenario table this file implements, including the places where
 the behaviour is imperfect but defensible, and the four numbered gaps (GAP-1 to GAP-4) where it is
-not. GAP-1 is the only one with an `xfail` against it, because it is the only one that is a bug
-rather than a scoped-out feature.
+not. GAP-1 was the only one that was a bug rather than a scoped-out feature, and it has been fixed:
+a permanently invalid payload now answers 422 with the delivery stored as `rejected`, instead of 202
+with a retry queued behind it. GAP-2 to GAP-4 remain open and scoped, and each says why.
 """
 
 from __future__ import annotations

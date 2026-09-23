@@ -34,7 +34,7 @@ prove that nothing was invented, and that is the property that has to hold befor
 
 ## The cases
 
-Six cases, each a hypothesis about how a writer fails. `well_evidenced` is the regression baseline;
+Six content cases, each a hypothesis about how a writer fails. `well_evidenced` is the regression baseline;
 the rest are the point.
 
 | Case | The trap |
@@ -89,7 +89,7 @@ sides, and values GTMOS derives from the evidence record (ages, confidences) cou
   any model's behaviour, because no model was run.
 - The graders are string and set operations. They do not detect a claim that is fluent, cited, and
   wrong about what the evidence *means*.
-- Six cases is a starting point, not coverage. A production suite grows every time something gets
+- Six content cases is a starting point, not coverage. A production suite grows every time something gets
   through: each incident becomes a case, which is what stops the same failure twice.
 - There is no human-preference or tone scoring, and no cost or latency budget, because nothing here
   calls a model.
