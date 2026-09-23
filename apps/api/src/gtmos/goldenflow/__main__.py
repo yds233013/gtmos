@@ -185,21 +185,32 @@ def run(base_url: str, run_key: str, via_n8n: bool) -> Flow:
 
     # 5–6 ── ingestion and identity resolution ------------------------------------------------------
     with session_scope() as db:
+        # Look the rows up by *this run's* dedupe keys rather than by a time window. Re-running the
+        # flow under the same run key is supposed to collide with itself — the event ids are derived
+        # from the run key precisely so that it does — and a time-window check reports that correct
+        # idempotent outcome as a failure, which is the opposite of the signal this harness exists
+        # to give. A replay that finds the rows already there is a pass, and says so.
+        expected = [flow.event_id(f"evt-{i}") for i in range(len(USERS))]
+        engagements = [
+            e
+            for e in db.scalars(select(Engagement).where(Engagement.account_id == account_id))
+            if e.dedupe_key and any(e.dedupe_key.endswith(k) for k in expected)
+        ]
         since = datetime.now(UTC) - timedelta(minutes=10)
-        engagements = list(
-            db.scalars(select(Engagement).where(Engagement.account_id == account_id, Engagement.occurred_at >= since))
-        )
+        fresh = [e for e in engagements if e.occurred_at >= since]
+        replayed = len(engagements) - len(fresh)
         flow.add(
             5,
             "GTMOS ingests the events",
-            bool(engagements),
-            f"{len(engagements)} engagement rows recorded in the last 10 minutes",
+            len(engagements) == len(USERS),
+            f"{len(engagements)}/{len(USERS)} engagement rows for this run key"
+            + (f" ({replayed} already present — the replay deduplicated, as intended)" if replayed else ""),
         )
         people = {e.contact_id or e.distinct_id for e in engagements}
         flow.add(
             6,
             "Account identity resolved",
-            bool(engagements),
+            len(people) == len(USERS),
             f"{len(people)} distinct people resolved to {FLAGSHIP_DOMAIN} by group key and email domain",
         )
 
