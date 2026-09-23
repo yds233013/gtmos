@@ -7,6 +7,11 @@ const API = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8010";
 const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: { root: __dirname },
+  // The Makefile, the README and the Playwright default all address the dev server as 127.0.0.1, but
+  // `next dev` only trusts localhost by default: the HMR handshake is rejected, the client never
+  // hydrates, and the page renders as a server-side shell where no tab, chart or form works. Failing
+  // silently and only in development is the worst version of that bug, so both hosts are trusted.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   poweredByHeader: false,
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: `${API}/api/v1/:path*` }];

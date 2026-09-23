@@ -120,9 +120,11 @@ The fastest tour (≈10 minutes; full script in [`docs/demo-script.md`](docs/dem
 
 | | |
 |---|---|
-| ![Score](docs/screenshots/03-account-score.png) | ![Research](docs/screenshots/03b-account-research.png) |
-| ![Approvals](docs/screenshots/04-approvals.png) | ![Workflows](docs/screenshots/05-workflows.png) |
-| ![Experiment](docs/screenshots/07-experiment.png) | ![Stack Inspector](docs/screenshots/08-stack-inspector.png) |
+| ![The flagship account, with every score component explained](docs/screenshots/03-account-kestrel.png) | ![The ICP, and the backtest that grades it](docs/screenshots/04-scoring.png) |
+| ![An experiment that wins on replies and is still rejected](docs/screenshots/08-experiment-provocative-subject.png) | ![Causal chains traced through one account set](docs/screenshots/12-stack-inspector.png) |
+| ![Attribution models compared on one deal](docs/screenshots/06-pipeline.png) | ![Routing rules and speed to first touch](docs/screenshots/09-routing.png) |
+
+More, with captions: [`docs/screenshots.md`](docs/screenshots.md).
 
 ## Architecture
 
