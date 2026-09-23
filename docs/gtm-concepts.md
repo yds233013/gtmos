@@ -56,7 +56,14 @@ Three simulated providers (firmographics at 1.0 credit with 82% coverage and a 5
 
 **Why it matters.** Fit tells you who could buy. Signals tell you who might buy now. Signals also go stale: a pricing visit from last week matters much more than one from last quarter.
 
-**How GTMOS does it.** `domain/signals.py::SIGNAL_TYPES` catalogs 13 types. Each has a category (intent, timing or engagement), a typical strength and a half-life, ranging from 14 days (pricing page, website) to 120 days (executive hire, expansion). Decay is exponential: `decay_factor = 0.5 ** (age_days / half_life)`. A signal's value (`domain/scoring.py::signal_value`) is `confidence × min(strength/typical, 1.25) × decay`, capped at 1.0. Repeat signals of the same type add 25% of their value each, so ten website visits do not count as ten signals. Future-dated signals (clock skew, bad feeds) are ignored.
+**How GTMOS does it.** `domain/signals.py::SIGNAL_TYPES` catalogs 19 types. Each has a category (intent, timing or engagement), a typical strength and a half-life, ranging from 14 days (pricing page, website) to 365 days (an unsubscribe request).
+
+**Six of them are disqualifying.** Competitor adopted, layoffs, budget freeze, champion departed, unsubscribed and AI initiative cancelled subtract points instead of adding them, and each carries the action it implies ("suppress the account from outbound", "multithread immediately: the replacement has no context"). A taxonomy where every observation is encouraging can never say *stop working this account*, and "stop" is the cheapest recommendation a GTM system can make. Two design decisions matter here:
+
+- **Penalties apply after the category caps.** Inside its own category a penalty would be absorbed by the cap: an account already at its engagement ceiling would lose nothing for its champion walking out. The point of a negative signal is that it must be able to hurt.
+- **Only the strongest instance of a type counts.** Two reports of the same layoff are one layoff; stacking the penalty would punish an account for how loudly its bad news was covered.
+
+Configuring a disqualifying type as a reward is a validation error, not a silent mistake that adds points for redundancies. Decay is exponential: `decay_factor = 0.5 ** (age_days / half_life)`. A signal's value (`domain/scoring.py::signal_value`) is `confidence × min(strength/typical, 1.25) × decay`, capped at 1.0. Repeat signals of the same type add 25% of their value each, so ten website visits do not count as ten signals. Future-dated signals (clock skew, bad feeds) are ignored.
 
 Ingestion (`services/signal_service.py`) follows the steps normalize → dedupe → persist → rescore → trigger workflows. `signal_dedupe_key` hashes `(type, account domain, source_ref)`, and Postgres enforces uniqueness with `UniqueConstraint(workspace_id, dedupe_key)`, so the same event arriving from two feeds becomes one signal. Pricing views become a signal only after 2 or more views in 7 days, keyed to the ISO week (`services/product_events.py`).
 
@@ -164,17 +171,25 @@ Free-mail domains (gmail.com and 18 others) never match. `normalize_domain` stri
 
 **How GTMOS does it.** `domain/routing.py::route`:
 
-- **Rules as data.** Rules are `{field, op, value}` conditions (`domain/rules.py`, with no `eval()`). Each has a priority and a strategy: `user` or `pool_least_loaded`.
+- **Named accounts come first.** An account flagged `is_named_account` stays with its owner and no territory rule can move it. Strategic accounts are assigned by agreement, usually negotiated above the RevOps team, and routing that quietly reassigns one is how trust in routing is lost.
+- **Rules as data.** Rules are `{field, op, value}` conditions (`domain/rules.py`, with no `eval()`). Each has a priority, a strategy (`user`, `pool_least_loaded` or `round_robin`) and an optional first-touch SLA.
 - **Conflict resolution.** The lowest priority number wins. On a tie, the more specific rule (more conditions) wins. On a further tie, the alphabetical rule key wins. Every losing rule is recorded with the reason it lost.
 - **Ownership.** An active existing owner is kept unless the winning rule has `overrides_existing_owner`. An inactive owner triggers reassignment.
-- **Distribution.** GTMOS uses least-loaded assignment (open accounts ÷ capacity, ties broken by name then id), not strict round-robin. When everyone is at capacity, it still assigns and raises a capacity alert.
-- **Fallbacks.** If a named user is inactive, the account falls back to that user's team pool. If nothing matches, it goes to a RevOps triage queue.
+- **Distribution.** `pool_least_loaded` assigns on open accounts ÷ capacity (ties broken by name then id) and is the right default when capacity differs. `round_robin` distributes evenly by hashing the account id over a sorted pool rather than keeping a shared counter: a real round robin gives exact balance but needs a lock, and sends the same account to a different rep depending on when it was routed. Hashing is idempotent — a replay after a crash reaches the same rep, and two workers racing cannot produce two owners — at the cost of exact balance. When everyone is at capacity it still assigns and raises a capacity alert.
+- **A fallback queue, not a shrug.** Exactly one rule is marked `is_fallback` and is evaluated last whatever its priority. Accounts no territory rule claims go to RevOps triage with a loose SLA. `unmatched` now means only that no queue is configured, which is a gap in the rule set and says so in the explanation.
+- **An SLA per rule.** The winning rule's `sla_hours` becomes a due-by timestamp on the decision. Tighter where intent is fresh (4h for a high-intent strategic account, 72h for triage), because an account routed correctly and then ignored for three days was not really routed.
 
-Every decision is saved as a `RoutingDecision` with matched rules, conflicts, the explanation and latency from the signal (`services/routing_service.py`).
+Every decision is saved as a `RoutingDecision` with matched rules, conflicts, the explanation, the SLA and latency from the signal (`services/routing_service.py`).
 
-*Demo:* Kestrel matched both "High-intent strategic → Senior AE" (priority 20) and "Enterprise NA → Enterprise AE pool" (priority 30). The first won on priority and the conflict is logged. The Stack Inspector finds 107 unmatched decisions in 90 days (APAC 71, LATAM 30) because the seed has no APAC rule. That territory gap is deliberate.
+**Speed to lead.** `sla_report` compares the promise against what happened, and the definitional choices are the interesting part:
 
-**Production would add.** Working hours and PTO, SLA timers with escalation, true round-robin with a last-assigned timestamp, account-based routing for leads (route to the account owner), and a rule-change dry run over historical data.
+- Measured against the **first outbound activity** (email, call, LinkedIn, meeting), not against a stage transition, which a nurtured account can reach long after its first email.
+- Only **lead events** start a clock — signal, inbound, PQL, workflow, manual. A territory reshuffle assigns thousands of accounts at once and is not a response to anything; counting those would turn the metric into a measure of list size that every team fails.
+- Four states, not two: **met**, **late**, **never touched** and **pending**. An assignment whose SLA has not elapsed is not a miss, and a late touch is a process problem while no touch at all is a leak. Collapsing those loses the one that costs money.
+
+*Demo:* Kestrel matched both "High-intent strategic → Senior AE" (priority 20) and "Enterprise NA → Enterprise AE pool" (priority 30). The first won on priority and the conflict is logged. Over 90 days, 655 lead-event assignments carry an SLA: 84% met, 98 late, 9 never touched, median 4.1 hours. The nine are accounts where a signal fired and nobody followed up — which is exactly what the report exists to find. The Stack Inspector traces a separate territory gap: 71 accounts in regions no active rule names fall through to triage.
+
+**Production would add.** Working hours and PTO so an SLA does not run overnight, escalation when one breaches, true round-robin with a last-assigned timestamp where exact balance matters more than idempotency, account-based routing for leads (route to the account owner), and a rule-change dry run over historical decisions.
 
 ---
 
@@ -365,7 +380,7 @@ Note the MDE as well: at ~300 per arm this test could only reliably detect a 10.
 
 **Why it matters.** Everything downstream (routing, scoring, attribution, CRM sync) inherits bad data. Duplicates cause double outreach, and a missing domain makes enrichment and upsert impossible.
 
-**How GTMOS does it.** `services/data_quality.py` defines 11 rules:
+**How GTMOS does it.** `services/data_quality.py` defines 12 rules:
 
 - duplicate contacts (normalized email, then same name on the same account)
 - duplicate accounts (normalized domain, then normalized company name)
@@ -378,10 +393,11 @@ Note the MDE as well: at ~300 per arm this test could only reliably detect a 10.
 - high-fit accounts without an owner
 - invalid pipeline transitions
 - bad CRM external IDs
+- provider disagreement (two confident sources contradict each other on a field that drives scoring or routing)
 
 Each issue has a stable fingerprint. Re-scans update `last_seen`, and issues that are no longer detected auto-resolve. Remediations (merge contacts or accounts, route, suppress) are explicit, audited actions, so nothing changes silently.
 
-*Demo:* 18 duplicate-contact groups, 6 duplicate-account groups, 81 invalid emails, 210 accounts with stale enrichment.
+*Demo:* 499 open issues — 18 duplicate-contact groups, 6 duplicate-account groups, 81 invalid emails, 304 accounts with stale enrichment, and 18 fields where two providers materially disagree and GTMOS kept the stored value rather than picking a winner on confidence.
 
 **Production would add.** Checks on ingest rather than only in batch, data contracts on upstream feeds, survivorship rules per field, and a CRM-side dedupe tool (Dedupely, or Salesforce duplicate rules).
 

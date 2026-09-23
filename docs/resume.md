@@ -33,7 +33,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
   approved while a blocking check fails and is never auto-written to the CRM.
 - Implemented GTM analytics and experimentation: funnel, velocity, stuck-account detection, 4-model attribution,
   deterministic account-level A/B assignment with Wilson and Newcombe intervals and minimum-sample gating.
-- Built a **GTM Stack Inspector** and data-quality engine (11 rules, audited remediation such as contact and
+- Built a **GTM Stack Inspector** and data-quality engine (12 rules, audited remediation such as contact and
   account merges) that computes system health and ranks automation opportunities with traceable evidence.
 - Shipped with **124 backend tests** (unit + Postgres integration), **14 component tests** and a **22-test
   Playwright** suite (desktop + mobile); mypy --strict, ruff, ESLint and tsc clean; one-command Docker

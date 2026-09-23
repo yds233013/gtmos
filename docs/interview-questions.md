@@ -13,14 +13,16 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Thesis.** Routing is a deterministic, explainable decision function: rules as data, explicit conflict resolution, ownership respected by default, fair distribution within pools, and a log entry for every decision.
 
 **Specifics.**
-- **Rules** are `{field, op, value}` conditions in a small safe language (`domain/rules.py`, no `eval`). Each rule has a priority and a strategy (a named user, or a least-loaded pool).
+- **Named accounts first.** An account flagged `is_named_account` keeps its owner and no territory rule can move it. Strategic accounts are assigned by agreement, and routing that silently reassigns one destroys trust in routing faster than any bug.
+- **Rules** are `{field, op, value}` conditions in a small safe language (`domain/rules.py`, no `eval`). Each rule has a priority, a strategy (named user, least-loaded pool, or round robin) and an optional first-touch SLA.
 - **Conflict resolution** (`domain/routing.py::_sort_key`): the lowest priority number wins, then the more specific rule (more conditions), then the rule key alphabetically. Losing rules are recorded with their reason, for example "lower priority (30 vs 20)".
 - **Ownership.** An active owner is kept unless the winning rule has `overrides_existing_owner`. An inactive owner triggers reassignment. An inactive named assignee falls back to their team's pool.
-- **Distribution** is least-loaded by `load / capacity`. When a whole pool is at capacity, the account is still assigned and a capacity alert is raised, so it never gets dropped.
-- **Unmatched** accounts go to a RevOps triage queue, and that path is visible. *Demo:* the Stack Inspector finds 107 unmatched decisions in 90 days (71 APAC, 30 LATAM) because the seed has no APAC rule, and it recommends adding one.
+- **Distribution.** Least-loaded by `load / capacity` where capacity differs; round robin where it does not. Round robin hashes the account id over a sorted pool instead of keeping a shared counter: a counter gives exact balance but needs a lock and sends the same account to a different rep depending on when it ran, while hashing is idempotent across a replay. When a whole pool is at capacity the account is still assigned and a capacity alert is raised, so it never gets dropped.
+- **A fallback queue, not a shrug.** One rule is marked `is_fallback` and is evaluated last whatever its priority, so accounts no territory rule claims go to RevOps triage. `unmatched` now means only that no queue is configured — a gap in the rule set, and the explanation says so. *Demo:* the Stack Inspector traces 71 accounts in regions no active rule names, falling through to triage because the seed has no APAC rule.
+- **Speed to lead.** Each rule carries an SLA (4h for a high-intent strategic account, 72h for triage) that becomes a due-by timestamp on the decision. The report measures against the first real outbound touch, counts only genuine lead events — a territory reshuffle assigns thousands at once and starts no clock — and separates *late* from *never touched*, because only one of those is a process problem. *Demo:* 655 assignments, 84% met, 98 late, 9 never touched, median 4.1 hours.
 - **Logging.** Every decision is a `RoutingDecision` with matched rules, the conditions that passed or failed with their actual values, conflicts, the explanation, and latency from the triggering signal (`services/routing_service.py`). A simulator runs the same function without applying the result.
 
-**Trade-offs.** I chose least-loaded over round-robin because it adapts to uneven capacity. The cost is that it can starve new reps with low loads less predictably, so production would add a last-assigned tiebreak. GTMOS has no working hours, PTO, SLA timers or escalation yet, and those come next. For inbound leads I would route to the account owner first (account-based routing) before applying territory rules.
+**Trade-offs.** Least-loaded adapts to uneven capacity but can starve a new rep unpredictably; round robin is fair but ignores load; I support both and pick per rule. Hash-based round robin trades exact balance for idempotency, which I would take in any system that retries. GTMOS still has no working hours or PTO, so an SLA can run overnight, and there is no escalation when one breaches — both are next. For inbound leads I would route to the account owner first (account-based routing) before applying territory rules.
 
 ### 2. How does an enrichment waterfall work?
 
@@ -68,10 +70,19 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 - **Five categories** with ICP-configurable budgets: Fit 35, Intent 25, Timing 15, Technical 15, Engagement 10. Each is capped at its budget. Grades are A ≥ 72, B ≥ 58, C ≥ 45, then D, with **X** for exclusions (sanctioned country, excluded industry, below 25 employees, do-not-target domain).
 - **Signals decay**: `confidence × relative strength × 0.5^(age/half-life)`. Repeat signals of the same type add only 25% each.
 - **Pure function** with an `inputs_hash`, so scores are reproducible, diffable across ICP versions, and unit-tested (`tests/unit/test_scoring.py`).
+- **Disqualifying signals subtract.** Six of the nineteen types (competitor adopted, layoffs, budget freeze, champion departed, unsubscribed, initiative cancelled) carry a penalty and the action it implies. Penalties apply *after* the category caps, because inside a category a maxed engagement score would absorb a champion's departure entirely — and the point of a negative signal is that it must be able to hurt. Only the strongest instance of a type counts: two reports of one layoff are one layoff.
 - *Demo:* Kestrel scores 98/A. Its explanation reads like "14 open AI/ML roles, observed 6 days ago… 45-day half-life → 88% of 10 pts."
-- **Validation** (`services/analytics.py::score_validation`). *Demo* meeting rates among contacted accounts: B 18.9%, C 15.5%, D 6.2%. The grade ordering holds.
+- **Bands are set from the distribution, not from round numbers.** The old 80/65/50 put a single account in grade A, because a 100-point score needs an account to max every category at once. The score's 99th percentile is 72, so the bands are 72/58/45 — roughly the top 1% and the next 10%, which is a day's list and a quarter's list.
 
-**Trade-offs.** Hand-set weights encode opinions. With a few hundred closed-won and closed-lost deals, I would fit a logistic regression on the same features, use it to set the weights, and keep the rules as the explanation layer. The current validation is also biased, because engagement points partly come from the outcomes being measured, and the code says so. A holdout backtest fixes that.
+**Evaluation** (`make backtest`, [`docs/scoring-evaluation.md`](scoring-evaluation.md)). This is the part I would want to be asked about:
+
+- The score is split into a **structural** variant (fit + technical: firmographics known before anyone was contacted) and the **total** shown in the product, which includes engagement points awarded for replies and meetings — part of the outcome being predicted.
+- On the demo data the total scores AUC 0.609 and the structural 0.544 with an interval of 0.494–0.595. **The honest number includes 0.5**: on this dataset the usable, non-leaking part of the score is not distinguishable from random, and the report leads with that rather than the flattering one.
+- Both available estimates are biased in opposite directions. Measured on contacted accounts only, the score is graded on the list it selected, so range restriction pulls the AUC down. Measured across every account, the untouched majority counts as failures, which rewards the score for agreeing with the targeting it drove (0.578). The truth is between them.
+- **The only unbiased design is a holdout**: contact a random sample regardless of score and compare conversion across bands. GTMOS does not run one, because it sends no email, and the report says that too.
+- Grade ordering does hold on the full dataset — meetings A 38.5% > B 18.9% > C 11.8% > D 8.7% — but grade A has 13 contacted accounts and an interval of 17.7–64.5%, so B versus D is the only comparison that survives a confidence interval.
+
+**Trade-offs.** Hand-set weights encode opinions, and I would rather ship opinions I can argue with than a model nobody can interrogate — on a new territory there is nothing to learn from anyway. With ~1,000 clean labelled outcomes and a point-in-time feature store I would fit a model and keep the rules as the explanation layer. The harness is deliberately model-agnostic: it takes (score, outcome) pairs, so the day the score becomes a prediction the same backtest grades it.
 
 ### 6. How would you detect buying signals?
 
@@ -93,10 +104,13 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 - **Assignment** is `sha256(salt:account_id) mod 10,000`: deterministic, reproducible, no assignment table needed. Account-level randomization stops two contacts at the same company from getting competing variants.
 - **Statistics**: Wilson intervals per arm, a pooled two-proportion z-test, and a Newcombe interval for the difference.
 - **Verdicts** refuse a winner below the pre-registered minimum sample, when any arm has fewer than 5 events, or when the difference CI includes zero.
-- *Demo:* funding-trigger vs generic (155 vs 136 accounts). Positive replies were 21.9% vs 10.3%, +11.6 pp, CI +3.1 to +19.9, p = 0.008, so the treatment wins on the primary metric. Meetings: p = 0.18. Opportunities: 5.8% vs 5.9%, p = 0.98. The honest conclusion is "better replies, pipeline effect unproven". **The effect is simulated by construction** (`REPLY_MULTIPLIER` in `seed/generator.py`), so this validates the method, not the message.
-- The running subject-line test (32 vs 47, minimum 250) correctly reports `insufficient_sample`.
+- **Guardrail metrics** (bounce, unsubscribe, spam complaint, negative reply) are evaluated *one-sided, for harm*: a breach requires the treatment's Wilson lower bound to clear the ceiling, or the lower bound of the regression against control to clear the tolerance. An improving guardrail is only ever "ok". They are deliberately **not** gated on the primary metric's minimum sample, because evidence of harm should not have to wait for evidence of benefit.
+- **A breach outranks a win.** The recommendation is `ship | do_not_ship | keep_running | no_change`, and a guardrail breach forces `do_not_ship` whatever the primary metric did.
+- **Minimum detectable effect** is reported with every result, so a null is readable as "no effect at this sample size" rather than ambiguously. It is derived by inverting the same sample-size function used to plan the test, so the two can never disagree.
+- *Demo:* `provocative-subject` (289 vs 311 accounts) lifts reply rate 21.8% → 40.5%, +18.7 pp, p < 0.001 — and the recommendation is **do not ship**, because unsubscribes go 0.35% → 2.25% (interval 1.09–4.57%, entirely above the 1% ceiling) and negative replies 3.1% → 11.3%. This is the example worth walking through: optimising reply rate alone is exactly how a team burns its sending domain.
+- The running subject-line test correctly reports `insufficient_sample`. **All effects are simulated by construction** in `seed/generator.py`, so this validates the method, not the message.
 
-**Trade-offs.** Fixed-horizon tests are slow at outbound volumes. Sequential or Bayesian methods allow legitimate early looks. Also note that `required_n_per_variant` is computed from the observed lift, which is post-hoc power. Sample size should be set before launch from a minimum detectable effect.
+**Trade-offs.** Fixed-horizon tests are slow at outbound volumes; sequential or Bayesian methods allow legitimate early looks. Guardrail ceilings are industry rules of thumb rather than fitted to this business. And a test that wins on replies but breaches a guardrail is only obviously wrong once the guardrail exists — the reason to build them before you need them.
 
 ### 8. What is reverse ETL?
 
@@ -113,7 +127,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Specifics.**
 1. **Decompose by source.** `analytics.period_comparison` splits opportunities created by source campaign, current vs previous period. *Demo, 28 days:* total pipeline actually rose ($1.99M vs $1.22M), but the funding-trigger campaign fell from $391k to $121k after it ended, and PLG fell $180k. Agent-launch outreach (+$804k) masked both.
 2. **Volume vs conversion.** Did sends drop, or did reply → meeting → opportunity rates drop? The funnel and breakdown endpoints answer this by segment, region, persona and grade.
-3. **Plumbing.** Look for routing gaps (107 unmatched decisions), PQL leakage (41 of 44 PQAs untouched within 3 days), dead-lettered workflows (14), failed syncs, and stale enrichment that drops accounts out of the ICP.
+3. **Plumbing.** Look for routing gaps (71 accounts in uncovered territories), PQL leakage (41 of 44 PQAs untouched within 3 days), dead-lettered workflows (14), failed syncs, and stale enrichment that drops accounts out of the ICP.
 4. **Data artifacts.** Invalid stage transitions and lifecycle conflicts distort funnel metrics.
 
 The Copilot routes "Why did pipeline fall?" to exactly these approved analyses (`services/copilot.py`, the `pipeline_change` intent). No LLM writes SQL.
@@ -313,3 +327,43 @@ Future-dated signals are ignored rather than trusted. Invalid webhook payloads b
 The result syncs to `gtmos_next_best_action`. *Demo:* Kestrel's is "Multi-thread to the economic buyer".
 
 **Trade-offs.** Ordered rules cannot trade off several good options against each other. With outcome data you could rank actions by expected value, but keep the reason string.
+
+### 25. Two enrichment providers disagree. What do you do?
+
+**Thesis.** Do not resolve it silently. Confidence is a provider's opinion of itself, and letting the marginally more self-assured source overwrite a stored value is how a CRM fills up with confident nonsense.
+
+**Specifics** (`domain/enrichment.py`).
+- **The second opinion is usually free.** A waterfall stops asking as soon as one provider answers confidently, so it looks like there is no second opinion — but a provider call returns every field it supports and GTMOS caches the whole response for the run. When a later position calls another provider for some *other* field, that response normally carries an unsolicited answer on fields already resolved. Those were being discarded; now they are compared.
+- **Only differences worth acting on count.** Casing, legal suffixes, numbers within 15%, and one provider seeing more of a tech stack than another are not disagreement. A flag that fires on noise is a flag nobody reads.
+- **Materiality follows consequence, not confidence.** A dissent counts if the dissenting provider is confident (≥ 0.6) *or* the numbers differ by more than 50% — a gap that size moves an account between segments, and therefore changes scoring and routing, whatever the source thinks of itself.
+- **A contested field keeps its value.** When two sources materially contradict each other about a field that already holds a value, the decision becomes `conflict`: the stored value stays and a data-quality issue is raised with a suggested fix. An empty field is still filled — a value beats no value — but the rejected answer is recorded alongside it and shown under the field on the account page.
+- *Demo:* 18 material conflicts. The Stack Inspector traces 8 of them to accounts where the rejected value would have changed the segment band or the ICP industry tier — meaning the owner and the grade were decided by a coin flip nobody saw.
+
+**Trade-offs.** This costs an extra field on `field_provenance` and a rule that can be noisy if the materiality thresholds are wrong. The alternative — survivorship rules per field producing a golden record — is the production answer, and needs a stated precedence order per field rather than a generic confidence comparison.
+
+### 26. How do you stop an automated GTM system that is doing damage?
+
+**Thesis.** With a button an operator can press, not a config change and a deploy. The person who notices a bad sequence sending is rarely the person who can ship.
+
+**Specifics** (`services/governance.py`).
+- **Three switches, not one**, because the reasons differ: automation (a rule is misbehaving), outbound (a message or list is wrong), CRM writes (sync is corrupting records). `pause_all` is the single stop button for when the reason is not yet known.
+- **Read from the database on every action.** A cached flag would mean a pause takes effect whenever the cache happens to expire, which is the one property a kill switch cannot have.
+- **Pausing is not cancelling.** A run queued before the pause stays queued and resumes where it stopped; nothing is failed or discarded.
+- **Blocked requests return `423 Locked`** with the operator's reason, so whoever hits it learns why. A `403` would imply they lack permission, which is not the case.
+- **Enforced where the action happens**, not at the edge: before a run row is created, before a draft can be approved, before the CRM adapter opens a connection. A UI-only switch is theatre.
+- Every change is audited with who, why and when, because that is the first question after an incident.
+
+**Trade-offs.** Three switches is a judgement call — more would be finer-grained but slower to reason about under pressure. There is no scheduled or automatic trip (for example, pause outbound when the bounce rate crosses a threshold), which is the obvious next step and the one that would make the deliverability model actionable rather than advisory.
+
+### 27. How do you tell a real causal chain from three unrelated numbers?
+
+**Thesis.** Intersect the account sets. "35 accounts missing employee count" and "90 unmatched routing decisions" are both true and can share almost no accounts; quoting them next to each other implies a chain the data does not support.
+
+**Specifics** (`services/stack_inspector.py`).
+- Every link **intersects** the running set, so a step can never count an account the previous step did not contain, and the reported number at each link is the survivors.
+- A chain with **no survivors is not shown at all**. Rendering it with zeros would read as "this happens, rarely" when the honest answer is "this does not happen here".
+- The mechanism is **shown, not asserted**: the size chain reports that 5 of 6 active rules test `account.segment`, and that the only segment-less accounts ever assigned were matched by the one rule that does not — so the dependency is visible rather than claimed.
+- Each chain states **what it does not prove**, and the size chain reports how much of the bigger number it explains rather than implying all of it.
+- Three candidate chains were **dropped** because the data did not support them: invalid email → bounce (0 of 30 bounces hit currently-invalid contacts), bounce → re-send, and duplicate account → attribution error.
+
+**Trade-offs.** Intersection is conservative: a real mechanism that operates through a different path shows as a weak chain. And several of these are still correlational — a region's unowned rate correlating with having no rule is not proof — so each chain carries an explicit confidence basis of "mechanism" or "correlation".

@@ -67,7 +67,7 @@ Everything shown is **DEMO** data and **SIMULATED** integrations; say so up fron
 
 ## 7. Is the machine healthy? (1.5 min)
 
-- **Data Quality**: 11 rules; fix a duplicate-contact group with one click (merge, audited). Manual issues
+- **Data Quality**: 12 rules; fix a duplicate-contact group with one click (merge, audited). Manual issues
   explain why they can't be auto-fixed.
 - **Stack Inspector**: overall status, eight systems with evidence blocks, ranked automation opportunities
   (e.g. "Act on fresh buying signals automatically: 42 A/B accounts had a signal in 14 days with no outreach").

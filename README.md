@@ -47,10 +47,22 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
 
 ### Highlights
 
-- **Explainable scoring.** Fit 35 · Intent 25 · Timing 15 · Technical 15 · Engagement 10. Signals decay by
-  half-life, exclusions produce grade X, and the input hash makes every score reproducible.
-- **Clay-style enrichment waterfall.** Per-field provider order, fallbacks on miss, error or low confidence,
-  cost accounting, and field-level provenance. Manual locks are never overwritten.
+- **Explainable scoring, and an honest measurement of whether it works.** Fit 35 · Intent 25 · Timing 15 ·
+  Technical 15 · Engagement 10, with half-life decay, grade X exclusions and a reproducible input hash. Then
+  `make backtest` grades it: AUC with confidence intervals, conversion by grade, precision@K — and separates
+  the score into a structural part (firmographics, no leakage) and the total (which includes engagement, and
+  therefore partly predicts itself). On the demo data the structural AUC is 0.544 with an interval that
+  **includes 0.5**, and [the report says so](docs/scoring-evaluation.md) rather than quoting the flattering
+  0.609.
+- **Signals that can say no.** Six of the nineteen signal types are disqualifying — competitor adopted,
+  layoffs, budget freeze, champion departed, unsubscribed, initiative cancelled — and each carries the action
+  it implies. Penalties apply *after* the category caps, because inside a category a full engagement score
+  would absorb a champion's departure entirely.
+- **Clay-style enrichment waterfall that surfaces disagreement.** Per-field provider order, fallbacks on miss,
+  error or low confidence, cost accounting, field-level provenance, and manual locks that are never
+  overwritten. When two confident providers contradict each other, the stored value is **kept** and the
+  disagreement is raised as a data-quality issue — the rejected answer is shown on the account page, because a
+  value three providers agree on and a value one won by 0.05 confidence should not look identical.
 - **Evidence-grounded AI.** Research claims must cite numbered evidence (E1..En) and uncited claims are
   stripped. Drafts follow *signal → pain → value → proof → CTA* and pass guardrails (no ungrounded numbers, no
   superlatives, verified signal, reachable contact) before they can be approved.
@@ -61,11 +73,29 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
   payload-hash change detection, and reverse ETL of computed properties.
 - **Signed webhooks.** HMAC with a replay window (n8n and generic senders), token header (PostHog), HubSpot v3
   verification, dedupe on event id, replayable failures. Rejected deliveries can't poison idempotency keys.
-- **Operating surfaces.** Data Quality (11 rules with audited remediation), Stack Inspector (health plus ranked
-  automation opportunities, every number traceable), Operations (runs, syncs, webhooks, providers, correlation
-  IDs), Audit log.
+- **Experiments that can say "do not ship".** Guardrail metrics (bounce, unsubscribe, spam complaint, negative
+  reply) are evaluated one-sided for harm, and a breach outranks any win on the primary metric. The seeded
+  provocative-subject test lifts reply rate 21.8% → 40.5% and is still rejected, because unsubscribes go 0.35%
+  → 2.25%. A minimum detectable effect is reported with every result, so a null reads as "no effect" or
+  "underpowered" rather than ambiguously.
+- **Routing with a clock.** Named accounts no rule can move, a fallback queue so nothing is simply unowned,
+  round robin that stays idempotent across a replay, and a per-rule first-touch SLA. Speed to lead is measured
+  against the first real outbound touch, counts only genuine lead events (a territory reshuffle starts no
+  clock), and keeps "late" separate from "never touched".
+- **Operating surfaces.** Data Quality (12 rules with audited remediation), Stack Inspector — which traces
+  **causal chains**, one account set intersected through every link, and reports the true overlap rather than
+  two true numbers about different accounts — Operations, and a full audit log.
+- **A stop button.** Runtime kill switches for automation, outbound and CRM writes, read from the database on
+  every action so a pause takes effect immediately rather than after a deploy. Blocked requests return `423`
+  with the operator's reason; queued work stays queued.
 - **Safe Copilot.** Question → intent → *approved* metric function → deterministic numbers → explanation. No
-  LLM-generated SQL, ever.
+  LLM-generated SQL, ever, and metrics GTMOS does not model (revenue, churn, NPS, CAC) are named as gaps
+  instead of approximated by the nearest metric that shares a word.
+- **A warehouse layer.** A [dbt project](warehouse/) modelling the operational database into analytics marts,
+  with 19 models and 113 tests, checked against the API's semantic layer so the two cannot drift apart.
+- **Evaluation for generated content.** `make llm-eval` grades whichever writer is configured against
+  adversarial cases: invented citations, ungrounded numbers, banned superlatives, and instructions hidden in
+  the evidence. It found a real one — untrusted feed text was being copied verbatim into research reports.
 
 ## Demo workflow
 
@@ -82,8 +112,10 @@ The fastest tour (≈10 minutes; full script in [`docs/demo-script.md`](docs/dem
 5. **Approvals**: guardrails, reasoning chain and evidence. Approve, or watch a fabricated metric get blocked.
 6. **Workflows → run detail**: step timeline, attempts, idempotency key and correlation id.
 7. **Routing → simulator**: see a high-intent enterprise account beat the territory rule and why.
-8. **Experiments**: funding-trigger personalization beat generic messaging on positive replies (+11.6 pp,
-   p = 0.008). Meetings and opportunities are *not* significant yet, and the page says so.
+8. **Experiments**: open `provocative-subject`. The treatment wins reply rate by 18.7 percentage points with
+   p < 0.001 — and the recommendation is **do not ship**, because unsubscribes went 0.35% → 2.25% and negative
+   replies 3.1% → 11.3%. This is the page to spend time on: optimising reply rate alone is how teams burn a
+   sending domain.
 9. **Data Quality → Stack Inspector → Copilot → Operations**: the system inspecting itself.
 
 | | |
@@ -257,6 +289,23 @@ residue, and evidence refs failing the numbers guardrail.
   See [`docs/warehouse.md`](docs/warehouse.md).
 - **LLM operations:** prompt/version registry, offline evals on a golden set (citation validity, unsupported
   claim rate), cost budgets and caching.
+
+## The part I would ask about in an interview
+
+A demo is easy to make impressive and hard to make trustworthy. The things I would want a GTM engineer to
+push on are the places where GTMOS reports something inconvenient:
+
+| Claim it would be easy to make | What GTMOS actually reports |
+|---|---|
+| "The score predicts conversion" | Structural AUC **0.544**, interval 0.494–0.595 — not distinguishable from random on this data. The leaking variant scores 0.609 and the report explains exactly why that number is contaminated. |
+| "Attribution shows what worked" | Four models, a deliberately **unattributed tail**, and a worked example where first-touch credits one campaign 100% and last-touch credits a different one 100% on the same deal. |
+| "Our best message won" | The winning subject line is recommended **against**, because it doubled unsubscribes while lifting replies. |
+| "Routing is solved" | 84% of lead-event assignments met their SLA; 98 were late and 9 were never touched at all. |
+| "The AI is grounded" | The evaluation harness found the generator copying attacker-supplied text out of a signal feed into a research report, and that is written up in [`docs/llm-evaluation.md`](docs/llm-evaluation.md). |
+| "The data is clean" | 499 open data-quality issues, including 18 fields where two providers materially disagree and GTMOS refused to pick a winner. |
+
+Every one of those numbers is computed from the demo dataset by code in this repository, and every one of them
+is reproducible with `make reset && make backtest`.
 
 ## Limitations
 

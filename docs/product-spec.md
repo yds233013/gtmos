@@ -52,7 +52,7 @@ Research gaps G1–G12 come from `docs/market-research.md` §7.
 | 18 | Analytics (G11) | **Command center**: funnel, stage conversion, pipeline, velocity, breakdowns | Every number computed from the database; DEMO badge |
 | 19 | Experiments (G10) | Deterministic hash assignment at the **account** level; lift, Wilson CIs, two-proportion z-test | Won't declare a winner below minimum sample or when CI crosses zero |
 | 20 | Attribution (G11) | First touch, last touch, linear, side-by-side | Shows how credited pipeline changes by model; unattributed share reported |
-| 21 | Data quality | 11 rules (duplicates, invalid emails, missing fields, stale enrichment, orphans, lifecycle conflicts, missing owners, invalid transitions, bad external IDs) | Fingerprinted issues; suggested remediation; merge/assign actions audited |
+| 21 | Data quality | 12 rules (duplicates, invalid emails, missing fields, stale enrichment, orphans, lifecycle conflicts, missing owners, invalid transitions, bad external IDs, provider disagreement) | Fingerprinted issues; suggested remediation; merge/assign actions audited |
 | 22 | Stack Inspector | Health of CRM sync, enrichment, routing, DQ, product-signal sync, attribution, workflows + ranked automation opportunities | Every metric and recommendation traceable to a query; no hardcoded percentages |
 | 23 | Copilot | Question → intent → approved semantic query → deterministic metrics → explanation | No LLM-generated SQL; plan and queries shown; works without API key |
 | 24 | Observability | **Operations** page: workflow runs, syncs, webhooks, failures, retries, latency, provider health | Correlation IDs on requests, runs, syncs and audit events |
