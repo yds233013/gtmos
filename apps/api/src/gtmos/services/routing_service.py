@@ -160,6 +160,12 @@ def rule_id_map(db: Session, workspace_id: uuid.UUID) -> dict[str, uuid.UUID]:
 # Touch types that count as "the rep responded". An internal note is not a touch.
 FIRST_TOUCH_TYPES = ("email_sent", "call", "linkedin", "meeting_held")
 
+# Speed to lead measures the response to a *new lead event* — a signal fired, a form came in, a
+# product threshold was crossed. A territory reshuffle assigns thousands of accounts at once and
+# starts no clock: counting those would make the metric a measure of list size rather than of
+# responsiveness, and every team would fail it.
+LEAD_TRIGGERS = ("signal.created", "inbound", "product.pql", "manual", "workflow")
+
 
 def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str, Any]:
     """Speed to lead: did the first touch happen inside the window routing promised?
@@ -179,6 +185,7 @@ def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str
                 RoutingDecision.sla_due_at.is_not(None),
                 RoutingDecision.decided_at >= since,
                 RoutingDecision.applied.is_(True),
+                RoutingDecision.trigger.in_(LEAD_TRIGGERS),
             )
             .order_by(RoutingDecision.decided_at)
         )
@@ -187,10 +194,12 @@ def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str
         return {
             "window_days": days,
             "decisions_with_sla": 0,
-            "note": "No routed accounts carry an SLA in this window.",
+            "note": "No lead-event routing decisions carry an SLA in this window.",
+            "hit_rate": None,
             "met": 0,
             "late": 0,
             "untouched": 0,
+            "pending": 0,
             "median_hours_to_first_touch": None,
             "by_rule": [],
             "worst": [],
@@ -215,7 +224,7 @@ def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str
         .all()
     )
 
-    met = late = untouched = 0
+    met = late = untouched = pending = 0
     hours: list[float] = []
     per_rule: dict[str, dict[str, Any]] = {}
     worst: list[dict[str, Any]] = []
@@ -223,18 +232,16 @@ def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str
     for d in decisions:
         after = sorted(t for t in touches.get(d.account_id, []) if t >= d.decided_at)
         first = after[0] if after else None
-        bucket = per_rule.setdefault(
-            rule_names.get(d.rule_id, "No rule") if d.rule_id else "No rule",
-            {
-                "rule": rule_names.get(d.rule_id, "No rule") if d.rule_id else "No rule",
-                "n": 0,
-                "met": 0,
-                "late": 0,
-                "untouched": 0,
-            },
-        )
+        label = rule_names.get(d.rule_id, "No rule") if d.rule_id else "No rule"
+        bucket = per_rule.setdefault(label, {"rule": label, "n": 0, "met": 0, "late": 0, "untouched": 0, "pending": 0})
         bucket["n"] += 1
         if first is None:
+            if d.sla_due_at is not None and now < d.sla_due_at:
+                # Assigned, not yet due. Counting this as a miss would penalise the team for the clock
+                # still running.
+                pending += 1
+                bucket["pending"] += 1
+                continue
             untouched += 1
             bucket["untouched"] += 1
             worst.append(
@@ -269,13 +276,17 @@ def sla_report(db: Session, workspace_id: uuid.UUID, days: int = 90) -> dict[str
     median = hours[len(hours) // 2] if hours else None
     worst.sort(key=lambda w: -w["overdue_hours"])
     total = len(decisions)
+    # The hit rate is measured over decisions whose clock has actually run out. Including pending ones
+    # would make the number drift down purely because a batch was assigned this morning.
+    decided = met + late + untouched
     return {
         "window_days": days,
         "decisions_with_sla": total,
         "met": met,
         "late": late,
         "untouched": untouched,
-        "hit_rate": round(met / total, 4),
+        "pending": pending,
+        "hit_rate": round(met / decided, 4) if decided else None,
         "median_hours_to_first_touch": round(median, 1) if median is not None else None,
         "by_rule": sorted(per_rule.values(), key=lambda r: -r["n"]),
         "worst": worst[:20],

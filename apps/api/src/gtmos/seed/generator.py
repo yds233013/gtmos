@@ -2891,6 +2891,18 @@ def seed(
     rules, users, rule_ids = load_rules(db, ws.id), load_users(db, ws.id), rule_id_map(db, ws.id)
     chris = c.users["chris"]
 
+    # The earliest real outbound touch per account. The routing decision is placed just before it,
+    # because speed to lead is measured against the first time a human actually reached out — not
+    # against the stage transition, which a nurtured account can reach long after its first email.
+    SLA_TOUCH_TYPES = {"email_sent", "call", "linkedin", "meeting_held"}
+    first_activity: dict[uuid.UUID, datetime] = {}
+    for row in c.activity_rows:
+        if row["type"] not in SLA_TOUCH_TYPES or row.get("account_id") is None:
+            continue
+        current = first_activity.get(row["account_id"])
+        if current is None or row["occurred_at"] < current:
+            first_activity[row["account_id"]] = row["occurred_at"]
+
     # Named accounts: the biggest strategic accounts are assigned to the senior AE by agreement, and no
     # territory rule may move them. Deterministic (largest first) so the demo shows the same set.
     sam = c.users["sam"]
@@ -2913,12 +2925,46 @@ def seed(
             (t["changed_at"] for t in c.transition_rows if t["entity_id"] == a.id and t["to_stage"] == "contacted"),
             None,
         )
-        last_sig = max((s["observed_at"] for s in c.signals[a.id]), default=None)
-        decided = first_touch or (last_sig + timedelta(hours=c.rng.uniform(0.2, 30)) if last_sig else now)
+        sig_times = [s["observed_at"] for s in c.signals[a.id]]
+        last_sig = max(sig_times, default=None)
+        # Routing happens *before* the first touch, and the gap between them is the speed-to-lead
+        # metric. Setting them equal would make every SLA green, which is the one result no real GTM
+        # team has ever seen. The lag is mostly small with a long tail: assignments that landed on a
+        # Friday, an owner on holiday, a queue nobody watched.
+        touch_at = first_activity.get(a.id) or first_touch
+        if touch_at is not None:
+            lag_hours = c.rng.uniform(0.2, 6) if c.rng.random() < 0.72 else c.rng.uniform(6, 96)
+            decided = touch_at - timedelta(hours=lag_hours)
+            # A decision cannot precede the signal that triggered it — but "the signal that triggered
+            # it" is the last one *before the touch*, not the most recent one overall. Clamping to the
+            # latest signal would push the decision past its own first touch on any account that has
+            # kept producing signals since.
+            trigger_sig = max((x for x in sig_times if x <= touch_at), default=None)
+            if trigger_sig is not None and decided < trigger_sig:
+                decided = trigger_sig
+        else:
+            decided = last_sig + timedelta(hours=c.rng.uniform(0.2, 30)) if last_sig else now
+        # A signal-driven assignment starts a speed-to-lead clock; a bulk territory assignment does
+        # not, and labelling them the same would turn the SLA report into a measure of list size.
+        # A qualifying signal on an account nobody then touched is the leak the SLA report exists to
+        # find: the clock started and ran out. Rare on purpose — common enough to show, not so common
+        # that the metric reads as "this team works nothing".
+        dropped = (
+            touch_at is None
+            and last_sig is not None
+            and last_sig >= now - timedelta(days=45)
+            and c.rng.random() < 0.3
+        )
+        if dropped and last_sig is not None:
+            decided = last_sig + timedelta(hours=c.rng.uniform(0.5, 8))
+        if touch_at:
+            trigger = "signal.created" if last_sig else "inbound"
+        else:
+            trigger = "signal.created" if dropped else "territory_sync"
         d = route_account(
             db,
             a,
-            trigger="seed",
+            trigger=trigger,
             decided_at=decided,
             users=users,
             rules=rules,

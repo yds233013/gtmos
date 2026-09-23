@@ -26,21 +26,26 @@ export function SlaPanel({ sla }: { sla: SlaReport | null }) {
       </Panel>
     );
   }
-  const total = sla.decisions_with_sla;
+  // The hit rate is measured over assignments whose clock has run out; a pending one is not a miss.
+  const decided = sla.met + sla.late + sla.untouched;
   return (
     <Panel
       title="Speed to first touch"
-      description={`${num(total)} assignments with an SLA over ${sla.window_days} days`}
+      description={`${num(sla.decisions_with_sla)} lead-event assignments with an SLA over ${sla.window_days} days`}
       bodyClassName="p-0"
     >
       <div className="p-4">
         <StatGrid>
-          <StatCell label="Met the SLA" value={pct(sla.met / total, 0)} sub={`${num(sla.met)} of ${num(total)}`} />
+          <StatCell
+            label="Met the SLA"
+            value={sla.hit_rate != null ? pct(sla.hit_rate, 0) : "—"}
+            sub={`${num(sla.met)} of ${num(decided)} whose clock has run out`}
+          />
           <StatCell label="Touched late" value={num(sla.late)} sub="worked, but after the promise" />
           <StatCell
             label="Never touched"
             value={num(sla.untouched)}
-            sub={sla.untouched ? "assigned and then ignored" : "none"}
+            sub={sla.untouched ? "the clock ran out and nobody reached out" : "none"}
           />
           <StatCell
             label="Median time to first touch"
@@ -60,6 +65,7 @@ export function SlaPanel({ sla }: { sla: SlaReport | null }) {
               <Th align="right">Met</Th>
               <Th align="right">Late</Th>
               <Th align="right">Never touched</Th>
+              <Th align="right">Still pending</Th>
             </tr>
           </THead>
           <tbody>
@@ -77,6 +83,9 @@ export function SlaPanel({ sla }: { sla: SlaReport | null }) {
                 </Td>
                 <Td align="right" className="text-xs">
                   {r.untouched ? <Badge tone="danger">{num(r.untouched)}</Badge> : <span className="text-muted">0</span>}
+                </Td>
+                <Td align="right" className="text-xs text-muted">
+                  {num(r.pending)}
                 </Td>
               </Tr>
             ))}

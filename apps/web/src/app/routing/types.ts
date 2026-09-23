@@ -100,6 +100,7 @@ export interface SlaByRule {
   met: number;
   late: number;
   untouched: number;
+  pending: number;
 }
 
 export interface SlaReport {
@@ -108,7 +109,8 @@ export interface SlaReport {
   met: number;
   late: number;
   untouched: number;
-  hit_rate?: number;
+  pending: number;
+  hit_rate: number | null;
   median_hours_to_first_touch: number | null;
   by_rule: SlaByRule[];
   worst: { account: string | null; account_id: string; state: "late" | "untouched"; overdue_hours: number }[];
