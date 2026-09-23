@@ -425,8 +425,12 @@ docs/             Architecture, research, evaluation, security, interview prep, 
 [Interview questions](docs/interview-questions.md) · [GTM concepts](docs/gtm-concepts.md) ·
 [Screenshots](docs/screenshots.md)
 
+**Release** · [Public demo safety](docs/public-demo-safety.md) · [Deployment plan](docs/deployment-plan.md) ·
+[Release checklist](docs/github-release-checklist.md) · [Git identity review](docs/git-identity-review.md)
+
 **Project reports** · [Phase 3 final](docs/phase3-final-report.md) ·
-[Phase 3 handoff](docs/phase3-handoff.md) · [Phase 4 baseline](docs/phase4-baseline.md)
+[Phase 3 handoff](docs/phase3-handoff.md) · [Phase 4 baseline](docs/phase4-baseline.md) ·
+[Phase 4 handoff](docs/phase4-handoff.md)
 
 ## License
 
