@@ -13,30 +13,6 @@ Recorded before any Phase 3 change, so every later claim can be diffed against a
 | Remotes | **None configured.** The repository is local only. |
 | Commits since the Phase 1 baseline `70d6938` | 22 |
 
-### Git author identity — mismatch to report
-
-Commits are authored as:
-
-```
-yds2330 <yashshah2311@berkeley.edu>
-```
-
-The intended GitHub identity is **`yds233013`**. Every commit in the repository's history carries
-`yds2330`, so the identity is at least *consistent*, but it does not match the intended account.
-
-**I have not changed it.** Rewriting authorship on existing commits needs explicit permission, and
-switching the identity part-way through Phase 3 would leave the history split across two names, which
-is worse than one wrong name. The fix, when authorised:
-
-```bash
-# future commits only
-git config user.name  "yds233013"
-git config user.email "<the email on the yds233013 GitHub account>"
-```
-
-Rewriting the existing 22+ commits would need `git filter-repo` (or an interactive rebase) and is a
-history rewrite, which Phase 3's safety boundary forbids without permission.
-
 ## Quality gates at baseline
 
 All verified by running them, not assumed:

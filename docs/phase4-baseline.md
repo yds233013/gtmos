@@ -15,7 +15,7 @@ and public-release safety.
 | Commits | 68 |
 | Working tree | clean |
 | Remote | **none configured** |
-| Author identity (all 68 commits) | `yds2330 <yashshah2311@berkeley.edu>` — uniform, no mixed identities |
+| Author identity | Uniform across all 68 commits — no mixed identities to reconcile |
 
 ## Mechanically verified counts
 
