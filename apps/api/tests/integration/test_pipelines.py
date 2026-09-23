@@ -232,9 +232,23 @@ def test_data_quality_detects_seeded_defects_and_merges_duplicates(db, ws):
     data_quality.remediate(db, issue, "tester@example.com")
     assert issue.status == "resolved"
     assert all(db.get(Contact, uuid.UUID(d)).merged_into_id is not None for d in dup_ids)
+    # `>= 0` was the previous assertion here, which no scan result can fail. What actually matters
+    # after a remediation is that a rescan does not resurrect the issue it just fixed — otherwise the
+    # merge looks successful and the queue refills with the same row on the next scan.
     again = data_quality.scan(db, ws.id, write_audit=False)
-    assert again["auto_resolved"] >= 0
     assert db.get(DataQualityIssue, issue.id).status == "resolved"
+    reopened = [
+        i
+        for i in db.scalars(
+            select(DataQualityIssue).where(
+                DataQualityIssue.workspace_id == ws.id,
+                DataQualityIssue.rule_key == "duplicate_contact",
+                DataQualityIssue.status == "open",
+            )
+        )
+        if i.fingerprint == issue.fingerprint
+    ]
+    assert not reopened, f"the rescan re-opened the duplicate group that was just merged: {again}"
 
 
 def test_manual_issue_cannot_be_auto_remediated(client, db, ws):

@@ -75,10 +75,29 @@ def test_the_providers_are_capable_of_disagreeing(db, ws):
     Asserted against the provider catalog, not this fixture's sample: how many conflicts a dataset
     contains depends on how many accounts it seeds, which is not the property under test.
     """
-    from gtmos.integrations.enrichment_providers import ENTITY_MISMATCH_RATE, TAXONOMY_DRIFT_RATE
+    from types import SimpleNamespace
 
-    assert ENTITY_MISMATCH_RATE > 0, "the scanner must sometimes answer a different question about headcount"
-    assert TAXONOMY_DRIFT_RATE > 0, "vendors must sometimes disagree about industry"
+    from gtmos.integrations.enrichment_providers import DemoWebScanProvider
+
+    # Reading the two rate constants and asserting they are positive was the previous version of this
+    # test. It executed no provider code at all, so it would have stayed green through any refactor
+    # that stopped applying them. Run the provider instead, over enough domains for the documented
+    # rates to show up, and assert the disagreement actually appears in the values it returns.
+    scanner = DemoWebScanProvider(universe_size=1000)
+    # Only the three attributes the scanner reads for these two fields. Constructing a full
+    # CompanyProfile here would couple the test to a seed dataclass it is not about.
+    profile = SimpleNamespace(industry="Retail", employee_count=1000, technologies=("python",))
+    domains = [f"probe-{i}.example" for i in range(400)]
+
+    headcounts = [scanner._value(profile, "employee_count", d).value for d in domains]
+    industries = [scanner._value(profile, "industry", d).value for d in domains]
+
+    # An entity mismatch is not noise: it is a different question answered, so the value lands far
+    # outside the +/-15% band that ordinary estimation noise produces.
+    far_off = [h for h in headcounts if h < profile.employee_count * 0.5 or h > profile.employee_count * 2]
+    assert far_off, "the scanner never produced an entity mismatch; headcount disagreement is only noise"
+
+    assert set(industries) != {profile.industry}, "vendors never disagree about industry taxonomy"
 
 
 def test_a_conflict_records_the_losing_value_and_who_said_it(conflict):

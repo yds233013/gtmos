@@ -7,6 +7,8 @@ specific AUC, which is allowed to move.
 
 from __future__ import annotations
 
+import pytest
+
 from gtmos.domain.scoring import GRADE_THRESHOLDS
 
 
@@ -76,9 +78,12 @@ def test_meeting_rate_rises_with_grade(client):
     # invert on noise. The full demo dataset has hundreds per band and is checked in the backtest.
     usable = [b for b in ordered if b["n"] >= 100]
     if len(usable) < 2:
-        # Nothing to assert on this dataset; the property is checked against the full demo data in
-        # docs/scoring-backtest.md. Failing here would punish a smaller fixture, not a worse score.
-        return
+        # Skip, never `return`. A bare return reports green, so on a fixture that happens to have
+        # fewer than two adequately-sized bands this test would assert nothing and still look like
+        # coverage. The property is checked against the full demo dataset in docs/scoring-backtest.md;
+        # failing here would punish a smaller fixture rather than a worse score, but silently passing
+        # is worse than either.
+        pytest.skip(f"only {len(usable)} band(s) with n >= 100 on this fixture; see docs/scoring-backtest.md")
     rates = [b["rate"] for b in usable]
     assert rates == sorted(rates, reverse=True), (
         "grade → meeting rate is not monotonic across bands with adequate samples: "
