@@ -70,7 +70,8 @@ All green at `3f3e5e4`:
 - One machine-specific path (`/Users/<user>/gtmos`) appeared in a document and is generalised in this
   phase.
 
-## What Phase 4 is allowed to change
+## Scope
 
-Application code only where it fixes a bug, improves demo comprehension, improves public-demo safety,
-improves visual presentation, fixes documentation drift, or fixes a release issue. Nothing else.
+Phase 4 changes application code only where it fixes a bug, improves demo comprehension, improves
+public-demo safety, improves visual presentation, fixes documentation drift, or fixes a release issue.
+Everything else it touches is presentation and documentation.

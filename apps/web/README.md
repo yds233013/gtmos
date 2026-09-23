@@ -1,36 +1,20 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# `apps/web` — the GTMOS interface
 
-## Getting Started
+A Next.js 16 App Router application. Every data page renders on the server per request: `src/lib/api.ts`
+is `server-only` and calls `await connection()`, which opts the page out of prerendering, so there is no
+static half to put on a CDN and no client-side data-fetching layer to keep in sync. The browser's
+`/api/v1/*` calls are rewritten to the FastAPI service server-side (`next.config.ts`), which is why the
+API's CORS allow-list protects nothing on its own and the `READ_ONLY` flag is the gate that matters.
 
-First, run the development server:
+Run it from the repository root rather than here — `make dev` starts the database, applies migrations,
+seeds the demo dataset and runs both processes. See the root [README](../../README.md).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+src/app          routes; every data page is server-rendered per request
+src/components   UI primitives, charts, and the per-surface panels
+src/lib          the server-only API client, formatters and types
+e2e              Playwright specs, run against a production build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Tests: `npm run test` (Vitest, component and helper level) and `npx playwright test` (end to end, needs
+the stack running). Both are wired into the root `Makefile` as `make test-web` and `make e2e`.

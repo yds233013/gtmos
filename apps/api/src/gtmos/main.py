@@ -70,9 +70,10 @@ def create_app() -> FastAPI:
 
         A middleware rather than a dependency on purpose. A dependency has to be attached to every
         router, and the next route somebody adds is the one that forgets — which is how this gap
-        appeared in the first place: of 36 mutating routes, four are genuinely gated and 24 have no
-        gate to be a no-op of. A method check at the edge cannot be forgotten, and it covers the
-        webhook and replay paths without naming them.
+        appeared in the first place: of 36 mutating routes, four are gated by an admin token and two by
+        a gate that is a no-op unless live writes are already on, which leaves **30 with no gate at
+        all**. A method check at the edge cannot be forgotten, and it covers the webhook and replay
+        paths without naming them.
 
         The allow-list is the point. Three POSTs compute and return an answer without writing a row,
         and they are the three most interesting things a visitor can actually *do*: re-grade 2,006

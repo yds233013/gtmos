@@ -42,8 +42,9 @@ class Settings(BaseSettings):
 
     # HubSpot (optional). Without a token the demo adapter is used and every sync is labeled SIMULATED.
     #: Refuse every write at the edge. For a publicly reachable demo instance; off everywhere else.
-    #: Of this API's 36 mutating routes, four are admin-gated and 24 have no gate at all, which is
-    #: fine on a laptop and not fine on the internet. Enforced in `main.enforce_read_only`.
+    #: Of this API's 36 mutating routes, four are admin-gated, two carry a gate that is a no-op
+    #: unless live writes are on, and the remaining 30 have no gate at all — fine on a laptop and
+    #: not fine on the internet. Enforced in `main.enforce_read_only`.
     read_only: bool = False
 
     hubspot_access_token: SecretStr | None = None

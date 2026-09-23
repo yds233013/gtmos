@@ -369,7 +369,7 @@ makes: 2,006 scored accounts with per-rule breakdowns, the signals timeline, the
 attribution analytics, the experiment with the rejected winner, `/integrations` with its "1 of 4"
 honesty, the approvals queue as a *read*, the operations and webhook-delivery surfaces, the data-quality
 issue list, the ICP preview, the routing simulator and the copilot. The three surfaces
-`phase3-handoff.md` names as "the argument" — `/integrations`,
+the README names as "the argument" — `/integrations`,
 `/experiments/provocative-subject` and the scoring evaluation — are all reads.
 
 ### P2 — Tell the visitor, in the product · 2–4 hours · improves the demo

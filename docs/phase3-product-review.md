@@ -18,7 +18,7 @@ genuinely different degrees, and one green badge would have flattened that into 
 are two independent axes — *mode* (what the running configuration does) and *verification* (how much
 of it has ever actually happened) — with a legend that explains them before the cards, and an
 explicit **Real service never reached** badge on the three that have not. The phrasing "1 of 4" for
-real services reached is the single most honest number in the product.
+real services reached is the number the rest of the page is built around.
 
 **The drilldown earns its click.** `/integrations/n8n` shows an error rate of 21.7% next to a
 `Degraded` pill and then lists the individual deliveries with signature status, attempt count,

@@ -29,8 +29,9 @@ leakage-contaminated variant scores 0.593, and [`docs/scoring-evaluation.md`](do
 explains why that is the wrong number to quote.
 
 **The best-performing message is recommended against.** The seeded subject-line test lifts reply rate
-+16.3 pp at p < 0.001, and the verdict is *do not ship*, because unsubscribes go 0.00% → 2.90%. Optimising
-the primary metric alone is how a team burns its sending domain.
++16.3 pp at p < 0.001 — and the extra replies are angry ones. Negative replies go 2.6% → 10.1% while
+*positive* replies actually fall, 11.3% → 10.5%, and unsubscribes go from exactly zero to 2.90%. The
+verdict is *do not ship*. Optimising the primary metric alone is how a team burns its sending domain.
 
 **The interesting part is the judgement, not the line count.** What to buy, what to orchestrate, what to
 build, what a score is allowed to claim, and what the system should refuse to do — each written down with
@@ -51,8 +52,9 @@ no "Connected" badge anywhere, because three of these four have never reached th
 
 ![Integrations](docs/screenshots/13-integrations.png)
 
-**It rejects the message that won.** +16.3 pp on reply rate at p < 0.001, and the recommendation is
-*do not ship*, because unsubscribes went from 0.00% to 2.90%.
+**It rejects the message that won.** +16.3 pp on reply rate at p < 0.001 — and negative replies went
+2.6% → 10.1% while positive replies fell. The extra replies were angry ones, so the recommendation is
+*do not ship*.
 
 ![Experiment](docs/screenshots/08-experiment-provocative-subject.png)
 
@@ -273,8 +275,10 @@ specifically to prove it: three deliveries, one with a bumped attempt number and
 reversed, produce one stored event.
 
 **Two workers racing the same run.** Persisted step state is not enough, because both workers read the
-same `pending` rows before either writes. Row-level locking with `SKIP LOCKED` is; the test distinguishes
-it from plain `FOR UPDATE`, which would pass a naive duplication check and still be wrong.
+same `pending` rows before either writes. Row-level locking with `SKIP LOCKED` is. Two tests, deliberately:
+one races two real connections and asserts no step ran twice, and a second asserts the *loser did not
+block* — which is what separates `SKIP LOCKED` from plain `FOR UPDATE`, since the plain version would
+pass the first test by waiting and then finding the work done.
 
 **Stale evidence at approval time.** Guardrails run when a draft is generated and never again. A signal
 retracted while the draft sat in the queue leaves a message citing evidence that no longer resolves — the
@@ -294,7 +298,7 @@ what a suite guarantees. [`docs/failure-tournament.md`](docs/failure-tournament.
 
 ## Evaluation honesty
 
-This is the part of the project most worth reading, and it is deliberately unflattering.
+Every claim below is checkable against the running system.
 
 - **A heuristic score is not an ML prediction.** GTMOS ranks with transparent weighted rules. It does not
   claim calibrated probabilities, and the evaluation reports it as a ranker.
@@ -332,6 +336,12 @@ Everything in containers instead: `make up`. Reload the demo dataset: `make rese
 :5678: `make n8n`. Host ports are deliberately uncommon (Postgres **56432**, Redis **56379**) to avoid
 clashing with other local services.
 
+**Putting this on a public URL?** Set `READ_ONLY=true`. Most of the API's mutating routes have no
+credential gate — deliberate for a local demo, wrong on the internet — and that flag refuses every write
+at the edge while leaving the ICP preview, the routing simulator and the copilot working. Never set
+`ANTHROPIC_API_KEY` or `HUBSPOT_ACCESS_TOKEN` on a public instance. The full audit, including what a
+visitor could otherwise do, is in [`docs/public-demo-safety.md`](docs/public-demo-safety.md).
+
 ## Tests
 
 Counts below are mechanically produced, not maintained by hand — the commands that produce them are in
@@ -339,13 +349,20 @@ Counts below are mechanically produced, not maintained by hand — the commands 
 
 | Suite | Count | Command |
 |---|---:|---|
-| Backend unit (pytest) | **210** | `make test-unit` |
-| Backend integration (pytest + Postgres) | **255** | `make test-api` |
+| Backend unit (pytest) | **213** | `make test-unit` |
+| Backend integration (pytest + Postgres) | **262** | `cd apps/api && uv run pytest tests/integration` |
 | Frontend component (Vitest) | **14** | `make test-web` |
 | End to end (Playwright, production build) | **25** | `make e2e` |
 | Warehouse (dbt **tests**, over 19 **models**) | **113** | `make warehouse` |
 
-`dbt build` prints `TOTAL=132`; that is 19 models **plus** 113 tests, not a test count. Also green: ruff,
+`make test-api` runs both backend suites together — **475** — which is why it is not the command beside
+either row. `make test` adds the frontend.
+
+`dbt build` prints `TOTAL=132`; that is 19 models **plus** 113 tests, not a test count. In the same
+spirit: 17 of the 25 end-to-end cases come from two parametrised loops (every page renders without an
+error boundary; no horizontal scroll on mobile), so that row is 8 distinct scenarios plus a sweep.
+A unit test asserts the two backend rows against a live collection, because this table went stale once
+and the sentence above it is only worth something if something enforces it. Also green: ruff,
 eslint, `mypy --strict`, `tsc`, migrations from empty with no model drift, and both Docker images.
 
 The demo figures quoted across these documents — routing SLA, the experiment, data quality,
@@ -419,18 +436,14 @@ docs/             Architecture, research, evaluation, security, interview prep, 
 **Connecting real services** (none has been run live) · [HubSpot](docs/hubspot-live-setup.md) ·
 [PostHog](docs/posthog-live-setup.md) · [Clay](docs/clay-live-setup.md)
 
-**Demos and interview prep** · [3-minute walkthrough](docs/portfolio-demo-script.md) ·
-[60-second version](docs/60-second-demo.md) · [Technical demo](docs/technical-demo.md) ·
-[Course](docs/gtmos-course.md) · [Interview drill](docs/interview-drill.md) ·
-[Interview questions](docs/interview-questions.md) · [GTM concepts](docs/gtm-concepts.md) ·
+**Learning the domain** · [GTM course](docs/gtmos-course.md) · [GTM concepts](docs/gtm-concepts.md) ·
 [Screenshots](docs/screenshots.md)
 
-**Release** · [Public demo safety](docs/public-demo-safety.md) · [Deployment plan](docs/deployment-plan.md) ·
-[Release checklist](docs/github-release-checklist.md) · [Git identity review](docs/git-identity-review.md)
+**Running it elsewhere** · [Public demo safety](docs/public-demo-safety.md) ·
+[Deployment plan](docs/deployment-plan.md)
 
-**Project reports** · [Phase 3 final](docs/phase3-final-report.md) ·
-[Phase 3 handoff](docs/phase3-handoff.md) · [Phase 4 baseline](docs/phase4-baseline.md) ·
-[Phase 4 handoff](docs/phase4-handoff.md)
+Everything else — the full research notes, the phase reports, the demo scripts and the interview
+material — is under [`docs/`](docs/).
 
 ## License
 

@@ -323,4 +323,4 @@ Offering these unprompted is worth more than any of the ten sections above.
 - **The run URL 404s.** Run ids are per-seed; take the newest **EXECUTED** run from `/workflows`.
 - **You are asked for something not built.** Prefer "not built, here is why and what it would cost" over
   a hedge. The next-steps list is in `docs/phase3-final-report.md` §4 and the open items in
-  `docs/phase3-handoff.md` §6.
+  the README's Limitations section.

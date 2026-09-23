@@ -48,5 +48,9 @@ warehouse/dbt_packages/
 warehouse/logs/
 warehouse/.user.yml
 
-# Scratch capture/verification scripts. One of these was swept into a commit by `git add -A`.
+# Scratch capture and verification scripts.
 apps/web/tmp-*.mjs
+
+# Personal job-search material: resume, positioning, identity review, release checklist.
+# Kept out of the public repository on purpose; still on disk in .private/.
+.private/

@@ -1,7 +1,8 @@
 """The `READ_ONLY` flag, for a publicly reachable demo instance.
 
 Of 36 mutating routes in this API, four are genuinely gated by `require_admin` and two more by a gate
-that is a no-op unless live writes are already enabled. The remaining 24 have no gate to be a no-op of.
+that is a no-op unless live writes are already enabled. The remaining 30 have no gate to be a no-op of
+(and in the shipped demo configuration, where no admin token is set, 33 of the 36 are open).
 That is fine on a laptop and not fine on a public URL, so the flag refuses every write at the edge.
 
 These tests exist because the allow-list is the part that rots: it is three literal strings, and the

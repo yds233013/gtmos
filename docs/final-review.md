@@ -48,12 +48,12 @@ deterministic?*
 | Waterfall reused a provider's cached response that lacked fields requested at later positions | unit test | first call requests every supported field for the run |
 | Unsigned (rejected) webhook delivery blocked a later valid signed delivery: idempotency-key poisoning | integration test | rejected events never count as seen; re-evaluated in place |
 | Wilson interval lower bound returned 5.5e-17 for zero successes (CI above the rate) | integration test | exact edges clamped; regression test |
-| Evidence refs like `[E12]` failed the numbers guardrail, so call-prep drafts could never be approved | agent review | refs stripped before numeric extraction; regression test |
+| Evidence refs like `[E12]` failed the numbers guardrail, so call-prep drafts could never be approved | review pass | refs stripped before numeric extraction; regression test |
 | `include_synthetic=false` and JSON text filters returned 500 (JSON variant lacks `.astext`) | browser QA | portable `.as_string()` |
 | `GROUP BY 1` rejected by SQLAlchemy in pipeline analytics | smoke test | labeled expressions |
 | Apollo adapter read `response.elapsed` before the body was read | mocked-HTTP test | monotonic clock timing |
 | Seed hung forever above 1,820 accounts (name space exhausted) | seed run | qualifiers added after repeated collisions |
-| Seeded failure history attached failures to non-existent steps and mismatched conditions | agent review | real condition evaluation; failures on actual steps |
+| Seeded failure history attached failures to non-existent steps and mismatched conditions | review pass | real condition evaluation; failures on actual steps |
 | An API key present in the shell would have made seeds call the live LLM | manual review | live LLM requires `LLM_ENABLED=true` in addition to a key |
 | A webhook that failed processing was acked as a duplicate when the sender retried | doc review | failed events are reprocessed on redelivery; integration test |
 | A contact holding two committee roles appeared twice in the evidence pack | doc review | evidence keyed by record; unit test |
@@ -94,7 +94,7 @@ deterministic?*
   integration (HubSpot), enrichment waterfalls (Clay-style), signal-based selling, routing, reverse ETL,
   workflow automation (n8n), product analytics (PostHog), AI research and personalization with guardrails, and
   data quality.
-- Resume bullets are scoped to verifiable repository facts (`docs/resume.md`) with explicit guidance on what
+- Resume bullets are scoped to verifiable repository facts, with explicit guidance on what
   not to claim.
 - **Suggestion (open):** record a 3-minute walkthrough video of the demo script for the portfolio link. It
   needs a human voice.
