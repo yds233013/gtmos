@@ -152,7 +152,14 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
         if val in (None, "", []):
             continue
         p = prov.get(fld, {})
-        shown = f"${val:,.0f}" if fld == "total_funding_usd" else (f"{val:,}" if isinstance(val, int) else val)
+        # Sanitised because enrichment writes these. Phase 2 cleaned signal text only, on the assumption
+        # that firmographics were GTMOS-owned facts; Phase 3's Clay boundary makes them attacker-reachable
+        # too — a poisoned `industry` value put a fabricated contract into a research brief in testing.
+        shown = (
+            f"${val:,.0f}"
+            if fld == "total_funding_usd"
+            else (f"{val:,}" if isinstance(val, int) else sanitize_external(str(val)))
+        )
         add(
             f"field:{fld}",
             kind="firmographic",
@@ -170,8 +177,8 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
         add(
             "field:technologies",
             kind="technographic",
-            label="Tech stack: " + ", ".join(techs),
-            detail="Detected technologies: " + ", ".join(techs) + ".",
+            label="Tech stack: " + ", ".join(sanitize_external(str(t)) for t in techs),
+            detail="Detected technologies: " + ", ".join(sanitize_external(str(t)) for t in techs) + ".",
             source=p.get("source", "crm"),
             confidence=float(p.get("confidence", 0.75)),
             record_type="account",
@@ -195,8 +202,11 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
         add(
             f"contact:{m['contact_id']}",
             kind="contact",
-            label=f"{m['name']}, {m['title']}",
-            detail=f"{m['name']} ({m['title']}), inferred {m['role_label'].lower()}: {m['reasons'][0]}",
+            label=f"{sanitize_external(m['name'])}, {sanitize_external(m['title'])}",
+            detail=(
+                f"{sanitize_external(m['name'])} ({sanitize_external(m['title'])}), "
+                f"inferred {m['role_label'].lower()}: {sanitize_external(m['reasons'][0])}"
+            ),
             source="gtmos_committee_inference",
             confidence=float(m["confidence"]),
             record_type="contact",
@@ -206,8 +216,8 @@ def build_evidence_pack(inp: ResearchInput) -> tuple[list[Evidence], dict[str, s
         add(
             f"activity:{act['id']}",
             kind="activity",
-            label=act["label"],
-            detail=act["detail"],
+            label=sanitize_external(act["label"]),
+            detail=sanitize_external(act["detail"]),
             source=act.get("source", "crm"),
             confidence=1.0,
             record_type="activity",
@@ -311,18 +321,23 @@ def generate_deterministic(inp: ResearchInput) -> ResearchOutput:
         return [idx[k] for k in keys if k in idx]
 
     # ACCOUNT SUMMARY
-    parts = [f"{a['name']} is"]
+    #
+    # Every field interpolated here is enrichment- or CRM-supplied, so each one is sanitised at the
+    # point of use as well as in the evidence pack. Cleaning only the pack would have missed this: the
+    # claim text reads the account dict directly, which is how a poisoned `industry` value still landed
+    # in a research brief after the pack was already being cleaned.
+    parts = [f"{sanitize_external(a['name'])} is"]
     if a.get("industry"):
-        parts.append(f"a {a['industry']} company")
+        parts.append(f"a {sanitize_external(str(a['industry']))} company")
     if a.get("employee_count"):
         parts.append(f"with ~{a['employee_count']:,} employees")
     if a.get("city"):
-        parts.append(f"headquartered in {a['city']}")
+        parts.append(f"headquartered in {sanitize_external(str(a['city']))}")
     S["account_summary"].append(
         Claim(" ".join(parts) + ".", refs("field:industry", "field:employee_count", "field:city"))
     )
     if a.get("funding_stage"):
-        txt = f"Funding stage: {a['funding_stage']}"
+        txt = f"Funding stage: {sanitize_external(str(a['funding_stage']))}"
         if a.get("total_funding_usd"):
             txt += f", ${a['total_funding_usd'] / 1e6:,.0f}M raised to date"
         S["account_summary"].append(Claim(txt + ".", refs("field:funding_stage", "field:total_funding_usd")))
@@ -386,7 +401,8 @@ def generate_deterministic(inp: ResearchInput) -> ResearchOutput:
     for m in inp.committee:
         S["buying_committee"].append(
             Claim(
-                f"{m['name']} ({m['title']}), likely {m['role_label'].lower()}: {m['reasons'][0]}.",
+                f"{sanitize_external(m['name'])} ({sanitize_external(m['title'])}), "
+                f"likely {m['role_label'].lower()}: {sanitize_external(m['reasons'][0])}.",
                 refs(f"contact:{m['contact_id']}"),
             )
         )
