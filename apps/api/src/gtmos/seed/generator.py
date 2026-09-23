@@ -1513,12 +1513,37 @@ def _guardrail_outcomes(
         _outcome(c, exp_unit, "spam_complaint", min(enroll + g.uniform(0.2, 9.0), -0.5))
 
 
+# How much each disqualifying signal reduces the chance this account engages at all. Severity mirrors
+# the score penalties: an unsubscribe is close to fatal, a budget freeze is a delay.
+NEGATIVE_DRAG: dict[str, float] = {
+    "unsubscribed": 0.05,
+    "competitor_adopted": 0.35,
+    "ai_project_cancelled": 0.4,
+    "champion_departed": 0.55,
+    "budget_freeze": 0.6,
+    "layoffs": 0.65,
+}
+
+
+def _negative_drag(signals: list[dict[str, Any]]) -> float:
+    drag = 1.0
+    for s in signals:
+        drag *= NEGATIVE_DRAG.get(s["signal_type"], 1.0)
+    return max(drag, 0.02)
+
+
 def _journey(c: Ctx, a: Account, p: CompanyProfile) -> None:
     rng = c.rng
     sigs = c.signals[a.id]
     prop = _propensity(p, a)
     if a.region in ("APAC", "LATAM"):
         prop *= 0.9
+    # A disqualifying signal has to actually disqualify. Subtracting points from the score without
+    # making the simulated world respond would add pure noise to the ranking: the backtest would then
+    # show the score getting *worse* for modelling risk correctly, which is an artefact of the seed
+    # rather than a property of the score. Applied as a multiplier on the existing propensity so no
+    # extra RNG is drawn and the rest of the dataset is unchanged.
+    prop *= _negative_drag(sigs)
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for s in sigs:
         by_type[s["signal_type"]].append(s)

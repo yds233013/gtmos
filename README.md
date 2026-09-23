@@ -51,9 +51,9 @@ TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS 
   Technical 15 · Engagement 10, with half-life decay, grade X exclusions and a reproducible input hash. Then
   `make backtest` grades it: AUC with confidence intervals, conversion by grade, precision@K — and separates
   the score into a structural part (firmographics, no leakage) and the total (which includes engagement, and
-  therefore partly predicts itself). On the demo data the structural AUC is 0.544 with an interval that
+  therefore partly predicts itself). On the demo data the structural AUC is 0.537 with an interval that
   **includes 0.5**, and [the report says so](docs/scoring-evaluation.md) rather than quoting the flattering
-  0.609.
+  0.593.
 - **Signals that can say no.** Six of the nineteen signal types are disqualifying — competitor adopted,
   layoffs, budget freeze, champion departed, unsubscribed, initiative cancelled — and each carries the action
   it implies. Penalties apply *after* the category caps, because inside a category a full engagement score
@@ -302,7 +302,7 @@ push on are the places where GTMOS reports something inconvenient:
 
 | Claim it would be easy to make | What GTMOS actually reports |
 |---|---|
-| "The score predicts conversion" | Structural AUC **0.544**, interval 0.494–0.595 — not distinguishable from random on this data. The leaking variant scores 0.609 and the report explains exactly why that number is contaminated. |
+| "The score predicts conversion" | Structural AUC **0.537**, interval 0.485–0.589 — not distinguishable from random on this data. The leaking variant scores 0.593 and the report explains exactly why that number is contaminated. |
 | "Attribution shows what worked" | Four models, a deliberately **unattributed tail**, and a worked example where first-touch credits one campaign 100% and last-touch credits a different one 100% on the same deal. |
 | "Our best message won" | The winning subject line is recommended **against**, because it doubled unsubscribes while lifting replies. |
 | "Routing is solved" | 84% of lead-event assignments met their SLA; 98 were late and 9 were never touched at all. |

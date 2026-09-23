@@ -52,7 +52,7 @@ same events the funnel reports, so the backtest and the funnel cannot disagree.
   without an interval is a number pretending to be a finding.
 - **Conversion by bucket** — equal-count bins from the top of the list down, plus conversion by grade,
   each with a Wilson interval and a lift against the base rate. Buckets under 30 accounts are flagged;
-  a 38% conversion rate on 13 accounts is not a fact.
+  a 33% conversion rate on six accounts is not a fact.
 - **Precision@K** — what a rep actually experiences: work the top 50/100/250/500 accounts, how many
   convert, versus what shuffling the list would have given.
 
@@ -67,16 +67,16 @@ the whole point of the exercise:
 
 ## 3. Results
 
-From the committed backtest, on the contacted cohort (n = 1,253, 145 meetings, base rate 11.6%):
+From the committed backtest, on the contacted cohort (n = 1,212, 139 meetings, base rate 11.5%):
 
 | Variant | AUC (meeting) | 95% CI |
 | --- | ---: | :---: |
-| Structural | 0.544 | 0.494–0.595 |
-| Pre-engagement | 0.564 | 0.513–0.615 |
-| Total | 0.609 | 0.558–0.660 |
+| Structural | 0.537 | 0.485–0.589 |
+| Pre-engagement | 0.553 | 0.501–0.606 |
+| Total | 0.593 | 0.540–0.645 |
 
 **Read the first row, not the third.** The total score looks meaningfully better than chance, but
-+0.065 of that AUC is circularity: accounts that replied scored higher *because* they replied. The
++0.056 of that AUC is circularity: accounts that replied scored higher *because* they replied. The
 structural score — the part that is usable for prospecting, before anyone has been contacted — has an
 interval that includes 0.5. **On this dataset the structural score is not distinguishable from random
 at the 95% level.** The report says so in its own warnings rather than leaving the reader to notice.
@@ -85,15 +85,15 @@ Conversion by grade is nonetheless ordered correctly:
 
 | Grade | Accounts | Meetings | Rate | 95% CI | Lift |
 | --- | ---: | ---: | ---: | :---: | ---: |
-| A | 13 | 5 | 38.5% | 17.7%–64.5% | 3.32× |
-| B | 169 | 32 | 18.9% | 13.7%–25.5% | 1.64× |
-| C | 484 | 57 | 11.8% | 9.2%–14.9% | 1.02× |
-| D | 587 | 51 | 8.7% | 6.7%–11.2% | 0.75× |
+| A | 6 | 2 | 33.3% | 9.7%–70.0% | 2.91× |
+| B | 160 | 28 | 17.5% | 12.4%–24.1% | 1.53× |
+| C | 448 | 54 | 12.0% | 9.4%–15.4% | 1.05× |
+| D | 598 | 55 | 9.2% | 7.1%–11.8% | 0.80× |
 
-A's interval is enormous (13 accounts). B versus D is the only comparison here that survives contact
-with a confidence interval. For the opportunity outcome the ladder is *not* monotonic — A 15.4% sits
-below B 16.0% — which is exactly what 13 accounts buys you, and the test suite asserts monotonicity
-only for the meeting outcome so this stays visible instead of being quietly smoothed.
+A's interval is enormous — six accounts, 9.7% to 70.0%. **B versus D is the only comparison here that
+survives contact with a confidence interval**, and the opportunity outcome puts A (16.7%) and B (15.6%)
+within a rounding error of each other. The integration test only asserts ordering across bands with at
+least 100 accounts, because asserting it on six would be a coin flip dressed as a regression test.
 
 ### Why the structural number is so weak
 
@@ -103,10 +103,10 @@ Two effects, pulling in opposite directions, and neither is fixable by better ar
   which is correlated with fit. The score is therefore graded on the list it selected: the low-fit tail
   that would make it look good was never worked. This biases the AUC *down*.
 - **Targeting feedback.** Measured across all 1,957 non-excluded accounts instead, structural AUC rises
-  to 0.578 — but now every uncontacted account counts as a failure, and they went uncontacted partly
+  to 0.553 — but now every uncontacted account counts as a failure, and they went uncontacted partly
   because the score said so. This biases the AUC *up*.
 
-The truth lies between 0.544 and 0.578, and neither number is a causal claim. **The only unbiased
+The truth lies between 0.537 and 0.553, and neither number is a causal claim. **The only unbiased
 design is a holdout: contact a random sample of accounts regardless of score, and compare conversion
 across score bands.** GTMOS does not run one, because the demo sends no email. In production this is
 a standing 5% randomised holdout on the target list, refreshed quarterly — the same discipline the
@@ -124,15 +124,34 @@ boundaries now come from the distribution and from how much a team can actually 
 
 | | Old (80/65/50) | New (72/58/45) |
 | --- | --- | --- |
-| A | 1 account (0.05%) | 19 accounts (0.9%) — a day's list |
-| B | 64 (3.2%) | 213 (10.6%) — a quarter's list |
-| C | 571 (28.5%) | 682 (34.0%) |
-| D | 1,321 (65.9%) | 1,043 (52.0%) |
+| A | 1 account (0.05%) | 12 accounts (0.6%) — a day's list |
+| B | 64 (3.2%) | 189 (9.4%) — a quarter's list |
+| C | 571 (28.5%) | 679 (33.9%) |
+| D | 1,321 (65.9%) | 1,077 (53.7%) |
+
+(Band sizes moved slightly after disqualifying signals were added, because a penalty can drop an
+account out of a band. The shape — a workable A list and a B list a team can sequence — is the point.)
 
 The conversion ladder above was checked after the change and is monotonic for meetings. **That check is
 in-sample**: the same accounts that set the bands validated them, so it is a sanity check, not evidence
 of predictive power. Thresholds fitted to outcomes on the same data would be overfitting; these were
 fitted to the *distribution*, with outcomes used only to confirm nothing is inverted.
+
+### One thing the simulation had to get right
+
+Disqualifying signals subtract points. When they were first added, the backtest got **worse** — grade A
+fell to a 10% meeting rate, below grade D. That was an artefact, not a finding: the negative signals were
+generated after the journeys, so they were pure noise added to the score with no corresponding effect on
+the simulated outcomes. The score was being penalised for modelling risk correctly.
+
+The fix was in the simulation, not the score: an account with a competitor already in production, or a
+departed champion, or an unsubscribe on file, now genuinely engages less (`_negative_drag` in the seed),
+with severity mirroring the score penalties. The ladder recovered to 33% / 17.5% / 12% / 9.2%.
+
+This is worth stating plainly because it is the failure mode of every simulated evaluation: **you can
+make a model look good by changing the world it is measured against.** The change here is defensible —
+it makes the simulated world behave the way the real one does — but a reader should know it happened and
+be able to find it. It is one function, and it is named.
 
 ## 5. Known weaknesses
 

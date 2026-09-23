@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from gtmos.api.deps import actor, db_session, parse_uuid, require_admin, row, workspace
 from gtmos.domain import metrics
+from gtmos.domain.deliverability import PROVIDER_DAILY_CAP, REPUTATION_SAFE_DAILY_CAP
 from gtmos.domain.routing import route as route_rules
 from gtmos.domain.workflows import ACTIONS
 from gtmos.models import (
@@ -35,6 +36,7 @@ from gtmos.services import (
     attribution_service,
     copilot,
     data_quality,
+    deliverability_service,
     experiments_service,
     governance,
     operations,
@@ -449,6 +451,23 @@ def attribution(
     days: int = Query(180, ge=30, le=365), db: Session = Depends(db_session), ws: Workspace = Depends(workspace)
 ) -> dict[str, Any]:
     return attribution_service.run(db, ws.id, days)
+
+
+@router.get("/outbound/deliverability")
+def deliverability(
+    days: int = Query(90, ge=7, le=365),
+    mailboxes: int = Query(deliverability_service.DEFAULT_MAILBOXES, ge=0, le=200),
+    per_mailbox_daily_cap: int = Query(REPUTATION_SAFE_DAILY_CAP, ge=1, le=PROVIDER_DAILY_CAP),
+    warmup_day: int = Query(deliverability_service.DEFAULT_WARMUP_DAY, ge=1, le=365),
+    db: Session = Depends(db_session),
+    ws: Workspace = Depends(workspace),
+) -> dict[str, Any]:
+    """Sending capacity, list risk, and how long the target list takes to work at a safe volume.
+
+    The mailbox arguments describe a *plan*: GTMOS has no mailbox and sends nothing, so they are inputs to
+    a calculator, not a description of infrastructure that exists.
+    """
+    return deliverability_service.assess(db, ws.id, days, mailboxes, per_mailbox_daily_cap, warmup_day)
 
 
 # Campaigns & experiments -----------------------------------------------------------------------------

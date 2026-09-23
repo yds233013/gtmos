@@ -64,7 +64,7 @@ class RampSchedule:
 
     start_per_day: int = 5
     daily_growth: float = 1.18
-    steady_state_per_day: int = REPUTATION_SAFE_DAILY_CAP
+    steady_state_per_day: int = REPUTATION_SAFE_DAILY_CAP  # the cap assumed when the caller declares none
 
     def __post_init__(self) -> None:
         if self.start_per_day < 1:
@@ -74,16 +74,18 @@ class RampSchedule:
         if self.steady_state_per_day < self.start_per_day:
             raise ValueError("steady state cannot be below the ramp's starting volume")
 
-    def allowance(self, warmup_day: int) -> int:
+    def allowance(self, warmup_day: int, cap: int | None = None) -> int:
         """Sends this mailbox may make on day `warmup_day` of its life (day 1 = its first sending day)."""
         if warmup_day < 1:
             return 0
+        ceiling = self.steady_state_per_day if cap is None else cap
         grown = self.start_per_day * self.daily_growth ** (warmup_day - 1)
-        return min(self.steady_state_per_day, math.floor(grown))
+        return min(ceiling, math.floor(grown))
 
-    @property
-    def days_to_full_volume(self) -> int:
-        span = self.steady_state_per_day / self.start_per_day
+    def days_to_full_volume(self, cap: int | None = None) -> int:
+        """First day the ramp reaches `cap`. A higher cap is not free: it takes longer to earn."""
+        ceiling = self.steady_state_per_day if cap is None else cap
+        span = max(1.0, ceiling / self.start_per_day)
         return max(1, math.ceil(math.log(span) / math.log(self.daily_growth)) + 1)
 
 
@@ -124,15 +126,16 @@ def sending_capacity(
         raise ValueError("warmup day starts at 1 (the mailbox's first sending day)")
 
     cap = min(per_mailbox_daily_cap, PROVIDER_DAILY_CAP)
-    allowance = min(cap, ramp.allowance(warmup_day))
-    is_warming = warmup_day < ramp.days_to_full_volume and allowance < cap
+    full_volume_day = ramp.days_to_full_volume(cap)
+    allowance = ramp.allowance(warmup_day, cap)
+    is_warming = allowance < cap
     if mailboxes == 0:
         limiting, note = "no_mailboxes", "No sending mailboxes declared, so the safe volume is zero."
     elif is_warming:
         limiting = "warmup"
         note = (
             f"Day {warmup_day} of warmup: {allowance} sends per mailbox against a configured cap of {cap}. "
-            f"Full volume on day {ramp.days_to_full_volume}. Sending the cap today is the single most common "
+            f"Full volume on day {full_volume_day}. Sending the cap today is the single most common "
             "way to burn a new domain."
         )
     else:
@@ -153,9 +156,9 @@ def sending_capacity(
         per_mailbox_daily_cap=cap,
         per_mailbox_allowance=allowance,
         daily_capacity=allowance * mailboxes,
-        steady_state_daily_capacity=min(cap, ramp.steady_state_per_day) * mailboxes,
+        steady_state_daily_capacity=cap * mailboxes,
         is_warming=is_warming,
-        days_to_full_volume=ramp.days_to_full_volume,
+        days_to_full_volume=full_volume_day,
         limiting_factor=limiting,
         note=note,
     )
@@ -182,7 +185,7 @@ def days_to_send(
     cap = min(per_mailbox_daily_cap, PROVIDER_DAILY_CAP)
     remaining = total_sends
     for offset in range(max_days):
-        remaining -= min(cap, ramp.allowance(warmup_day + offset)) * mailboxes
+        remaining -= ramp.allowance(warmup_day + offset, cap) * mailboxes
         if remaining <= 0:
             return offset + 1
     return None

@@ -3,12 +3,14 @@ import { chromium, devices } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 
-const BASE = "http://127.0.0.1:3010";
+const BASE = "http://localhost:3010"; // 127.0.0.1 is not an allowed dev origin -> client never hydrates
+const API = "http://127.0.0.1:8010";
 const OUT = path.resolve("../../docs/screenshots");
 const PROBE = process.argv.includes("--probe");
 const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").split("=")[1];
 
-const KESTREL = "c5c23567-74a1-5483-bc14-224b4eb057e6";
+const KESTREL = (await (await fetch(`${API}/api/v1/workspace`)).json()).flagship_account_id;
+console.log("flagship:", KESTREL);
 
 /** full: true => fullPage, false => viewport only */
 const PAGES = [
@@ -48,8 +50,12 @@ async function settle(page, { chart = true } = {}) {
   await page.waitForFunction(() => document.querySelectorAll("[data-loading], .animate-pulse").length === 0, null, { timeout: 15000 }).catch(() => {});
   if (chart) {
     await page.waitForFunction(() => {
-      const svgs = [...document.querySelectorAll("svg.recharts-surface, .recharts-wrapper svg")];
-      return svgs.length === 0 || svgs.every((s) => s.getBoundingClientRect().height > 0 && s.querySelector("path, rect, line, circle, text"));
+      const wrappers = [...document.querySelectorAll(".recharts-responsive-container, .recharts-wrapper")];
+      if (wrappers.length === 0) return true;
+      return wrappers.every((w) => {
+        const s = w.querySelector("svg");
+        return s && s.getBoundingClientRect().height > 0 && s.querySelector("path, rect, line, circle, text");
+      });
     }, null, { timeout: 15000 }).catch(() => {});
   }
   await page.addStyleTag({ content: STYLE });
@@ -66,9 +72,10 @@ async function inspect(page) {
       height: document.documentElement.scrollHeight,
       chars: txt.length,
       svgs: document.querySelectorAll("svg").length,
+      charts: document.querySelectorAll(".recharts-surface").length,
       tables: document.querySelectorAll("table").length,
       skeletons: document.querySelectorAll(".animate-pulse").length,
-      bad: /application error|something went wrong|failed to (load|fetch)|unhandled runtime error|500 internal|this page could not be found/i.test(txt),
+      bad: /application error|something went wrong|failed to (load|fetch)|unhandled runtime error|500 internal|this page could not be found|API unavailable|API is unavailable|No workspace/i.test(txt),
       head: txt.slice(0, 300).replace(/\s+/g, " "),
     };
   });
@@ -90,13 +97,27 @@ const report = [];
 for (const p of PAGES) {
   if (ONLY && !p.file.includes(ONLY)) continue;
   await page.setViewportSize({ width: 1440, height: p.vh ?? 900 });
-  await page.goto(p.url, { waitUntil: "domcontentloaded" });
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await page.goto(p.url, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => {});
+    const probe = await inspect(page);
+    if (!probe.bad && probe.h1 && probe.chars > 800) break;
+    console.log(`  retry ${attempt} for ${p.file}: bad=${probe.bad} h1=${probe.h1} chars=${probe.chars}`);
+    await page.waitForTimeout(4000);
+  }
   if (p.file.includes("copilot")) {
     await page.waitForLoadState("networkidle").catch(() => {});
-    await page.getByPlaceholder(/why did pipeline fall/i).fill("Which segment has the highest meeting conversion?");
-    await page.getByRole("button", { name: /^ask$/i }).click();
-    await page.getByText(/highest meeting rate/i).first().waitFor({ timeout: 20000 });
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1500); // hydration
+    const chip = page.locator("button.rounded-full").first();
+    await chip.waitFor({ timeout: 20000 });
+    console.log("  copilot chip:", (await chip.innerText()).trim());
+    await chip.click();
+    try {
+      await page.getByText(/How this was computed/i).first().waitFor({ timeout: 30000 });
+    } catch {
+      console.log("  copilot answer did not render:", (await page.innerText("main")).replace(/\s+/g, " ").slice(0, 300));
+    }
+    await page.waitForTimeout(1200);
   }
   await settle(page);
   const info = await inspect(page);
@@ -114,7 +135,7 @@ for (const p of PAGES) {
     console.log(`${p.file}\t${full ? "full" : "view"}\th=${info.height}\t${Math.round(size / 1024)}KB\th1=${info.h1}`);
   } else {
     report.push({ ...p, ...info });
-    console.log(`${p.file}\th=${info.height}\tsvg=${info.svgs}\ttbl=${info.tables}\tskel=${info.skeletons}\tbad=${info.bad}\th1=${info.h1}\t| ${info.head.slice(0, 120)}`);
+    console.log(`${p.file}\th=${info.height}\tcharts=${info.charts}\tsvg=${info.svgs}\ttbl=${info.tables}\tskel=${info.skeletons}\tbad=${info.bad}\th1=${info.h1}\t| ${info.head.slice(0, 120)}`);
   }
 }
 

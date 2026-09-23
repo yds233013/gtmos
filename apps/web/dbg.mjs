@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ channel: "chrome" });
+const c = await b.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light", baseURL: "http://localhost:3010" });
+const p = await c.newPage();
+p.on("pageerror", e => console.log("PAGEERROR:", String(e).slice(0,300)));
+const r = await p.goto("/accounts/c5c23567-74a1-5483-bc14-224b4eb057e6", { waitUntil: "networkidle" });
+console.log("status", r.status());
+await p.waitForTimeout(3000);
+console.log("TEXT:", (await p.innerText("main")).replace(/\s+/g," ").slice(0,700));
+console.log("h:", await p.evaluate(()=>document.documentElement.scrollHeight), "charts:", await p.evaluate(()=>document.querySelectorAll(".recharts-surface").length));
+await b.close();

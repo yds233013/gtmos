@@ -401,17 +401,31 @@ def match_lead_to_account(lead: Lead, accounts: Sequence[AccountRef]) -> LeadMat
                 return ambiguous(hits, method, f"Domain '{dom}'")
         brand = domain_brand(dom)
         brand_hits = [i for i in idx if brand and i.brand == brand]
+        lead_name = normalize_company_name(lead.company_name)
         if len(brand_hits) == 1:
-            return LeadMatch(
-                brand_hits[0].account.key,
-                "brand_domain",
-                0.78,
-                f"'{dom}' and account domain '{brand_hits[0].account.domain}' share the brand label '{brand}' on "
-                "different TLDs, and no other account claims it.",
-                tuple(rejected),
-                review_required=True,
-            )
-        if len(brand_hits) > 1:
+            # A brand label is the weakest domain key, so a company name that disagrees with the candidate
+            # overrules it: 'orion.de' is Orion Pharma, not the Orion Manufacturing account we have.
+            best_name = max((name_similarity(lead_name, n) for n in brand_hits[0].names), default=0.0)
+            if lead_name and best_name < NEAR_MISS_FLOOR:
+                rejected.append(
+                    RejectedCandidate(
+                        brand_hits[0].account.key,
+                        "brand_domain",
+                        round(best_name, 3),
+                        f"shares the brand label '{brand}' but the company names disagree",
+                    )
+                )
+            else:
+                return LeadMatch(
+                    brand_hits[0].account.key,
+                    "brand_domain",
+                    0.78,
+                    f"'{dom}' and account domain '{brand_hits[0].account.domain}' share the brand label '{brand}' on "
+                    "different TLDs, and no other account claims it.",
+                    tuple(rejected),
+                    review_required=True,
+                )
+        elif len(brand_hits) > 1:
             return ambiguous(brand_hits, "brand_domain", f"Brand label '{brand}'")
 
     name = normalize_company_name(lead.company_name)

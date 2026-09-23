@@ -431,3 +431,23 @@ Each issue has a stable fingerprint. Re-scans update `last_seen`, and issues tha
 *Demo:* The Stack Inspector reports that 41 of 44 accounts that crossed the usage threshold in 60 days had no sales touch within 3 days. That is the leakage this workflow exists to close.
 
 **Production would add.** Real PostHog/Segment destinations, user-to-account aggregation across workspaces, PQL definitions tuned by conversion analysis, and in-app plus sales-assist plays.
+
+---
+
+## 22. Deliverability as a constraint on outbound volume
+
+**What it is.** How much a team can send before mailbox providers start filtering it, and how that ceiling compares with how much the campaign plan needs to send. Domain reputation, not prospect count, is what limits outbound.
+
+**Why it matters.** Volume is the easiest lever to pull and the only one that can destroy the channel. Google's bulk-sender rules (February 2024) put the spam-complaint limit at **0.30%** with **0.10%** as the target, measured in Postmaster Tools; Microsoft has required SPF, DKIM and DMARC of senders above 5,000 messages a day since **2025-05-05**. Nobody publishes a bounce limit, but under 2% is the vendor consensus for healthy and over 5% for a list nobody verified. A campaign plan that ignores these does not fail loudly — the domain just starts landing in Junk, for every campaign at once.
+
+**How GTMOS does it.** GTMOS has no mailbox and sends nothing, so `domain/deliverability.py` models the constraint instead of exercising it, in two halves that the payload keeps apart.
+
+- **Capacity is a plan.** Mailbox count, per-mailbox daily cap and warmup day against a ramp schedule (start at 5/day, grow ~18%/day, reach full volume in about two weeks). Days-to-work-a-list is simulated day by day rather than divided by today's capacity, because during warmup division is wrong in both directions. Google Workspace's published 2,000 recipients/day is carried as a policy ceiling and explicitly *not* as a sending plan.
+- **Risk is measured, conservatively.** Bounce and reply rates per message, complaints and unsubscribes per account touched, and two list-quality censuses. Counted rates get Wilson intervals, so nothing is called a breach on one event in a small sample, and the per-account denominator overstates the per-message rate a provider would compute rather than flattering it.
+- **The verdict changes the plan.** `scale` / `caution` / `throttle` / `stop` multiplies the planned volume by 1, 1, 0.5 and 0. `GET /outbound/deliverability` returns capacity, risk and the gap.
+
+*Demo (90 days):* 3,903 sends, 104 bounces — **2.66%** (95% CI 2.20–3.22%), proven over the 2% line — 1 complaint across 806 accounts touched (0.12%), 10 unsubscribed accounts (1.24%), a 4.92% reply rate, and a contact list that is 0.72% unsendable but **12.73% never verified**. Risk score 13/100, verdict **throttle**: 4 mailboxes at 40/day is 160 sends/day on paper and 80 after the throttle, against 1,125 targetable contacts × 3 email steps = 3,375 sends, or **43 days** to work the list and 15 days to reach every account once.
+
+**What this does not model.** IP reputation as distinct from domain reputation, inbox placement (which needs seed-list testing or Postmaster Tools), authentication as a pass/fail prerequisite, per-provider filtering differences, content scoring and blocklists. The capacity figures describe a sending setup that does not exist, and the observed rates come from simulated demo activity — only the thresholds are real.
+
+**Production would add.** Google Postmaster Tools and seed-list placement data, a suppression register and per-account contact-fatigue caps enforced on the approval queue, real address verification, and per-mailbox rather than per-domain reputation tracking.
