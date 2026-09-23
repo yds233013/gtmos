@@ -184,14 +184,22 @@ The Copilot routes "Why did pipeline fall?" to exactly these approved analyses (
 
 **Specifics** (`integrations/signatures.py`).
 - **GTMOS scheme:** `HMAC-SHA256(secret, "{timestamp}.{raw_body}")`, rejected if the timestamp is outside ±5 minutes.
-- **HubSpot v3:** base64 HMAC over `method + uri + body + timestamp`, with a 5-minute window.
+- **HubSpot v3:** base64 HMAC over `method + uri + body + timestamp`, with a 5-minute window enforced in
+  **both** directions — a future-dated timestamp is rejected too. The URI is hashed **exactly as received**;
+  an earlier version ran `unquote()` over it, which breaks any request carrying a percent-encoded character.
+- **HubSpot v1**, and this is the one people get wrong: **private app** webhooks are documented to send
+  `X-HubSpot-Signature`, a plain SHA-256 of `clientSecret + body` — not an HMAC, and with **no timestamp and
+  therefore no replay window**. A private app is what a free developer test account uses, so a verifier that
+  only speaks v3 rejects every delivery from the environment it is most likely to be tested in. GTMOS accepts
+  v1 and v2 with v3 preferred, gets its replay defence on that path from event-id dedupe instead, and returns
+  a detail string saying which scheme verified so the Operations page can show it.
 - **Shared-token header** for PostHog, which cannot compute HMACs.
 - **Constant-time comparison** with `hmac.compare_digest` everywhere.
 - **Fail closed:** a missing secret is rejected in production (`webhook_service.receive`).
 - **Size limit:** bodies over 1 MB return 413.
 - **Rejected events** are stored (for forensics) but never count as seen.
 
-**Trade-offs.** The HubSpot verifier checks only "too old", not future timestamps. It also signs `str(request.url)`, which behind a TLS-terminating proxy may not match the URL HubSpot signed, so production needs proxy-aware URL reconstruction. Tokens are weaker than HMACs because they can be replayed if leaked, so I would put PostHog behind an allowlist or a relay that signs.
+**Trade-offs.** The verifier signs `str(request.url)`, which behind a TLS-terminating proxy may not match the URL HubSpot signed, so production needs proxy-aware URL reconstruction. The v1 path has no replay window at all — dedupe is doing that work, which is weaker and is labelled as such rather than hidden. Tokens are weaker than HMACs because they can be replayed if leaked, so I would put PostHog behind an allowlist or a relay that signs. And none of these endpoints is rate-limited; that belongs at the edge in production, not in application code where a naive in-process limiter gives false confidence across workers.
 
 ### 14. How do you handle API rate limits?
 
