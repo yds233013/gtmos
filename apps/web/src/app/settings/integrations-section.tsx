@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { Badge, LiveBadge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/states";
 import type { Integration } from "@/components/insights/types";
@@ -155,6 +157,14 @@ export function IntegrationsSection({
           </ul>
         </section>
       ))}
+      <p className="text-[11px] text-muted">
+        This is the provider registry. For per-boundary health, mode and — the part that matters — how much of each
+        integration has ever genuinely run, see{" "}
+        <Link href="/integrations" className="text-accent-text hover:underline">
+          Integrations
+        </Link>
+        .
+      </p>
       <p className="text-[11px] text-muted">
         Secrets are read from the API&apos;s environment at startup and never shown here. Outbound send is{" "}
         {ws?.outbound_send_enabled ? "enabled" : "disabled"} in this workspace: approved drafts are handed to your sending tool, not sent by

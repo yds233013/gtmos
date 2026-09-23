@@ -522,3 +522,134 @@ export interface Inspector {
   context: { stuck_accounts: number; stuck_by_stage: Record<string, number>; open_opportunities: number };
   method: string;
 }
+
+/* Integration observability (GET /integrations/status, /integrations/{provider}/activity). */
+
+export type IntegrationMode = "not_configured" | "demo" | "test" | "live";
+export type VerificationLevel = "unverified" | "simulated" | "verified_locally" | "verified_by_execution";
+export type IntegrationHealth = "healthy" | "degraded" | "failing" | "idle" | "not_configured";
+
+export interface IntegrationRequirement {
+  key: string;
+  kind: "env" | "account" | "service" | string;
+  configured: boolean;
+  purpose: string;
+}
+
+export interface IntegrationWindow {
+  days: number;
+  inbound_events: number;
+  inbound_processed: number;
+  inbound_by_status: Record<string, number>;
+  signature_status: Record<string, number>;
+  duplicates_absorbed: number;
+  syncs: number;
+  sync_failures: number;
+  sync_partial: number;
+  enrichment_attempts: number;
+  error_count: number;
+  retry_count: number;
+  error_rate: number | null;
+  records_processed: number;
+  records_failed: number;
+  latency: {
+    inbound_p50_ms: number | null;
+    inbound_p95_ms: number | null;
+    sync_p50_ms: number | null;
+    enrichment_avg_ms: number | null;
+  };
+}
+
+export interface IntegrationStatus {
+  provider: string;
+  display_name: string;
+  category: string;
+  direction: "inbound" | "outbound" | "bidirectional" | string;
+  summary: string;
+  moves: string[];
+  endpoints: string[];
+  docs: { label: string; path: string }[];
+  registered: boolean;
+  registry_mode: string | null;
+  mode: IntegrationMode;
+  mode_description: string;
+  verification: VerificationLevel;
+  verification_description: string;
+  verification_note: string;
+  reached_real_service: boolean;
+  requirements: IntegrationRequirement[];
+  blocking: string[];
+  health: IntegrationHealth;
+  last_inbound_event_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure: string | null;
+  window: IntegrationWindow;
+  lifetime: {
+    inbound_events: number;
+    real_deliveries: number;
+    synthetic_history: number;
+    live_sync_runs: number;
+  };
+}
+
+export interface IntegrationStatusResponse {
+  window_days: number;
+  generated_at: string;
+  modes: Record<string, string>;
+  verification_levels: Record<string, string>;
+  integrations: IntegrationStatus[];
+}
+
+export interface IntegrationEvent {
+  id: string;
+  source: string;
+  event_type: string;
+  status: string;
+  signature_status: string;
+  error: string | null;
+  attempts: number;
+  duplicate_count: number;
+  processing_ms: number | null;
+  received_at: string;
+  correlation_id: string | null;
+  synthetic_history: boolean;
+  result_summary: Record<string, string | number | boolean>;
+}
+
+export interface IntegrationSyncRun {
+  id: string;
+  job: string;
+  direction: string;
+  object_type: string;
+  status: string;
+  is_simulated: boolean;
+  records_changed: number;
+  records_failed: number;
+  records_skipped: number;
+  retries: number;
+  duration_ms: number | null;
+  started_at: string;
+  trigger: string;
+  correlation_id: string | null;
+  error: string | null;
+}
+
+export interface IntegrationError {
+  kind: "webhook" | "sync" | string;
+  at: string;
+  label: string;
+  status: string;
+  message: string | null;
+  correlation_id: string | null;
+}
+
+export interface IntegrationActivity {
+  provider: string;
+  display_name: string;
+  window_days: number;
+  since: string;
+  events: IntegrationEvent[];
+  syncs: IntegrationSyncRun[];
+  errors: IntegrationError[];
+}
