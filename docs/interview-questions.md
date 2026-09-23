@@ -18,7 +18,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 - **Conflict resolution** (`domain/routing.py::_sort_key`): the lowest priority number wins, then the more specific rule (more conditions), then the rule key alphabetically. Losing rules are recorded with their reason, for example "lower priority (30 vs 20)".
 - **Ownership.** An active owner is kept unless the winning rule has `overrides_existing_owner`. An inactive owner triggers reassignment. An inactive named assignee falls back to their team's pool.
 - **Distribution.** Least-loaded by `load / capacity` where capacity differs; round robin where it does not. Round robin hashes the account id over a sorted pool instead of keeping a shared counter: a counter gives exact balance but needs a lock and sends the same account to a different rep depending on when it ran, while hashing is idempotent across a replay. When a whole pool is at capacity the account is still assigned and a capacity alert is raised, so it never gets dropped.
-- **A fallback queue, not a shrug.** One rule is marked `is_fallback` and is evaluated last whatever its priority, so accounts no territory rule claims go to RevOps triage. `unmatched` now means only that no queue is configured — a gap in the rule set, and the explanation says so. *Demo:* the Stack Inspector traces 87 accounts in regions no active rule names, falling through to triage because the seed has no APAC rule.
+- **A fallback queue, not a shrug.** One rule is marked `is_fallback` and is evaluated last whatever its priority, so accounts no territory rule claims go to RevOps triage. `unmatched` now means only that no queue is configured — a gap in the rule set, and the explanation says so. *Demo:* the Stack Inspector traces 95 accounts in regions no active rule names, falling through to triage because the seed has no APAC rule.
 - **Speed to lead.** Each rule carries an SLA (4h for a high-intent strategic account, 72h for triage) that becomes a due-by timestamp on the decision. The report measures against the first real outbound touch, counts only genuine lead events — a territory reshuffle assigns thousands at once and starts no clock — and separates *late* from *never touched*, because only one of those is a process problem. *Demo:* 604 assignments, 78.7% of the decided ones met, 106 late, 22 never touched, median 4.4 hours.
 - **Logging.** Every decision is a `RoutingDecision` with matched rules, the conditions that passed or failed with their actual values, conflicts, the explanation, and latency from the triggering signal (`services/routing_service.py`). A simulator runs the same function without applying the result.
 
@@ -127,7 +127,7 @@ Paths are relative to `apps/api/src/gtmos/` unless they start with `docs/`.
 **Specifics.**
 1. **Decompose by source.** `analytics.period_comparison` splits opportunities created by source campaign, current vs previous period. *Demo, 28 days:* total pipeline actually rose ($1.99M vs $1.22M), but the funding-trigger campaign fell from $391k to $121k after it ended, and PLG fell $180k. Agent-launch outreach (+$804k) masked both.
 2. **Volume vs conversion.** Did sends drop, or did reply → meeting → opportunity rates drop? The funnel and breakdown endpoints answer this by segment, region, persona and grade.
-3. **Plumbing.** Look for routing gaps (87 accounts in uncovered territories), PQL leakage (41 of 44 PQAs untouched within 3 days), dead-lettered workflows (19), failed syncs, and stale enrichment that drops accounts out of the ICP.
+3. **Plumbing.** Look for routing gaps (95 accounts in uncovered territories), PQL leakage (46 of 53 PQAs untouched within 3 days), dead-lettered workflows (19), failed syncs, and stale enrichment that drops accounts out of the ICP.
 4. **Data artifacts.** Invalid stage transitions and lifecycle conflicts distort funnel metrics.
 
 The Copilot routes "Why did pipeline fall?" to exactly these approved analyses (`services/copilot.py`, the `pipeline_change` intent). No LLM writes SQL.
@@ -293,9 +293,9 @@ Future-dated signals are ignored rather than trusted. Invalid webhook payloads b
 
 **Thesis.** You do not settle them with a model. Show every model side by side so the disagreement is visible, report unattributed pipeline honestly, and use experiments or holdouts for causal questions.
 
-**Specifics.** `domain/attribution.py` runs first, last, linear and U-shaped (40/20/40) models over a 180-day lookback. `services/attribution_service.py` lists its own limitations: account-level touches only, no offline or ad touches, opens excluded, not causal. *Demo:* the webinar gets $269k first-touch and $0 last-touch. Marketing and sales can both be "right" about the same deal.
+**Specifics.** `domain/attribution.py` runs first, last, linear and U-shaped (40/20/40) models over a 180-day lookback. `services/attribution_service.py` lists its own limitations: account-level touches only, no offline or ad touches, opens excluded, not causal. *Demo:* the webinar "Evaluating LLM agents in production" is credited **$1.52M first-touch and $60K last-touch** — a 96% spread on one campaign. Marketing and sales can both be "right" about the same deal and be describing different things.
 
-**Trade-offs.** The demo shows 0% unattributed, which is an artifact of synthetic data. Real CRMs have large gaps. Self-reported attribution and incrementality tests (holding out a region or segment from a campaign) answer the question the models cannot.
+**Trade-offs.** The demo attributes **83.9%** of pipeline and leaves **14 of 77 opportunities and $1.07M explicitly unattributed** — a tail the report shows rather than redistributes, because silently spreading unattributable pipeline across the campaigns that happen to have touches is how attribution stops being measurement. A real CRM's tail is larger still. Self-reported attribution and incrementality tests (holding out a region or segment from a campaign) answer the question the models cannot.
 
 ### 22. How do you get buy-in from sales for new GTM tooling?
 
@@ -314,7 +314,7 @@ Future-dated signals are ignored rather than trusted. Invalid webhook payloads b
 
 **Thesis.** Measurement and plumbing before AI: clean account data (dedupe and domains), an agreed ICP and score that reps trust, routing that never drops a lead, and pipeline reporting that ties back to source.
 
-**Specifics.** In GTMOS terms, the order is data quality → scoring → routing → reverse ETL → signals and workflows → research and personalization → experiments. The Stack Inspector encodes this prioritization: it ranks recommendations by the number of high-value accounts affected (*demo:* acting on fresh signals affects 42 A/B accounts, PQL routing 41, and the enrichment backlog 296).
+**Specifics.** In GTMOS terms, the order is data quality → scoring → routing → reverse ETL → signals and workflows → research and personalization → experiments. The Stack Inspector encodes this prioritization: it ranks recommendations by the number of high-value accounts affected (*demo:* acting on fresh signals affects 74 accounts, PQL routing 46, and the enrichment backlog 35).
 
 **Trade-offs.** Some teams need a quick visible win to earn trust. A signal-to-draft workflow for the top 50 accounts can be that win while the plumbing work continues.
 

@@ -72,7 +72,7 @@ PostHog are contracts exercised locally. Section 8 shows the product saying exac
 - **Data Quality**: 12 rules; fix a duplicate-contact group with one click (merge, audited). Manual issues
   explain why they can't be auto-fixed.
 - **Stack Inspector**: overall status, eight systems with evidence blocks, ranked automation opportunities
-  (e.g. "Act on fresh buying signals automatically: 42 A/B accounts had a signal in 14 days with no outreach").
+  (e.g. "Act on fresh buying signals automatically: 74 accounts had a signal in 14 days with no outreach").
   Every number is a live query.
 - **Copilot**: ask "Why did pipeline fall?" and open *How this was computed*: intent → approved metric →
   numbers. It never writes SQL.
