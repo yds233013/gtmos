@@ -300,7 +300,7 @@ Downstream, idempotency is layered: signals have dedupe keys, workflow runs have
 - **Experiments.** Metrics are reply, positive reply, meeting and opportunity (`services/experiments_service.py::METRICS`).
 - **Attribution.** Opens are excluded from touches (`services/attribution_service.py::TOUCH_TYPES`).
 
-*Demo (90 days):* 4,103 sent, 1,685 opens (shown but not used), 217 replies, 134 positive, 87 meetings, 57 opportunities.
+*Demo (90 days):* 3,862 sent, 1,552 opens (shown but not used), 194 replies, 108 positive, 72 meetings, 62 opportunities. These move with the dataset — `GET /api/v1/analytics/overview` is the current answer.
 
 **Production would add.** Deliverability monitoring (bounce and spam rates against Gmail's 0.3% threshold, domain warm-up), reply classification, and meeting-booked integration from the calendar tool.
 

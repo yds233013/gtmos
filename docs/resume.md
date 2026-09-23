@@ -12,7 +12,7 @@ business outcomes. GTMOS has no real customers or production traffic, so don't i
 
 - Built an end-to-end GTM operating system (FastAPI, PostgreSQL, Redis/RQ, Next.js) that scores, enriches,
   routes and researches **2,000 accounts** and drafts evidence-grounded outreach behind a human approval queue;
-  **40-table** schema, **90** API operations across 86 paths, **21** page routes.
+  **40-table** domain schema, **90** API operations across 86 paths, **21** page routes.
 - Designed an **explainable account-scoring engine** (fit, intent, timing, technical, engagement) as a pure,
   deterministic function with signal half-life decay, ICP versioning and reproducible input hashes; every point
   is attributed to a rule and its evidence.

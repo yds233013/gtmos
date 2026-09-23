@@ -1,269 +1,80 @@
 # GTMOS
 
-**An AI-native revenue engine: it finds the accounts to sell to, explains why now, drafts evidence-grounded outreach for human approval, then routes, syncs and measures everything on deterministic, auditable infrastructure.**
+**An AI-native GTM control plane: it connects product signals, enrichment, CRM state and custom decision
+logic to work out which accounts deserve attention, why now, who owns them, and whether any of it worked.**
 
 ![Command center](docs/screenshots/01-overview.png)
 
-> **Everything you see is DEMO data.** GTMOS ships with a deterministic, synthetic dataset for a fictional
-> seller (*Sentinel AI*, reliability infrastructure for AI agents) and 2,000 fictional target accounts on
-> reserved `.example` domains. Every integration runs in a clearly labeled **DEMO / SIMULATED** mode unless you
-> configure credentials. GTMOS never sends email or LinkedIn messages.
+> **Everything here is DEMO data.** GTMOS ships with a deterministic, synthetic dataset for a fictional
+> seller — *Sentinel AI*, reliability infrastructure for AI agents — and 2,006 fictional accounts on
+> reserved `.example` domains. **It has never sent an email or a message to anyone**, and no paid model
+> call was made building it. Each integration is labelled with exactly how far it has been verified,
+> which for three of the four is "never talked to the vendor".
 
 ---
 
 ## The short version
 
-Four things about this project that a longer read will confirm and a skim should not have to wait for.
+Four things a longer read will confirm, put first so a skim does not have to wait for them.
 
-**One of its four integrations is verified by execution.** n8n runs locally in Docker on a pinned image
-and its workflows genuinely fire against this API. HubSpot runs on a simulated adapter whose live half has
+**One of four integrations is verified by execution.** n8n runs locally in Docker on a pinned image and
+its workflows genuinely fire against this API. HubSpot runs on a simulated adapter whose live half has
 never touched a real portal. Clay and PostHog are contracts exercised locally against documented payload
-shapes; neither vendor has ever been called. The `/integrations` page says exactly that, in the product,
-and there is no "Connected" badge anywhere because three of the four have never been.
+shapes. The `/integrations` page says exactly that, in the product, and there is no "Connected" badge
+anywhere — because three of the four have never been.
 
-**The scoring model does not work yet, and the repository is the thing that says so.** Structural AUC
+**The scoring model does not work yet, and this repository is the thing that says so.** Structural AUC
 **0.537**, 95% interval 0.485–0.589 — not distinguishable from random on this data. The flattering,
 leakage-contaminated variant scores 0.593, and [`docs/scoring-evaluation.md`](docs/scoring-evaluation.md)
-explains why that number is the wrong one to quote.
+explains why that is the wrong number to quote.
 
 **The best-performing message is recommended against.** The seeded subject-line test lifts reply rate
-+16.3 pp with p < 0.001, and the verdict is *do not ship*, because unsubscribes go 0.00% → 2.90%.
-Optimising the primary metric alone is how a team burns its sending domain.
++16.3 pp at p < 0.001, and the verdict is *do not ship*, because unsubscribes go 0.00% → 2.90%. Optimising
+the primary metric alone is how a team burns its sending domain.
 
-**Nothing here has ever sent a message to anyone, and no paid model call was made building it.** The
-default writer is deterministic. The data is synthetic and every surface labels it.
+**The interesting part is the judgement, not the line count.** What to buy, what to orchestrate, what to
+build, what a score is allowed to claim, and what the system should refuse to do — each written down with
+its reasoning, so it can be argued with specifically.
 
 If you have five minutes: open `/integrations`, then `/experiments/provocative-subject`, then
-[`docs/scoring-evaluation.md`](docs/scoring-evaluation.md). Those three are the argument.
+[`docs/scoring-evaluation.md`](docs/scoring-evaluation.md).
 
 ---
 
-## Why I built this
+## The problem
 
-Modern GTM teams run on a patchwork: enrichment in Clay, scoring in a spreadsheet, routing in HubSpot
-workflows, signals in five browser tabs, attribution in a BI tool nobody trusts, and "AI personalization" that
-invents facts. The GTM Engineer's job is to turn that patchwork into **a system**: one where every account has
-an explainable score, every signal becomes an action within minutes, every automation is idempotent and
-observable, and AI accelerates reps without becoming an unreviewed source of CRM truth.
+A modern go-to-market team runs on four kinds of system, and none of them talks to the others.
 
-GTMOS is that system, built end to end: the data model, the deterministic engines, the integration boundaries
-and the operating surfaces. The point of it is the judgement it encodes — which decisions belong in versioned
-code, which belong to a vendor, what a score is allowed to claim, and what a system should refuse to do — not
-the line count. Every one of those decisions is written down with its reasoning, so you can disagree with it
-specifically.
+| | Question it answers | Typical tool |
+|---|---|---|
+| Product analytics | What are users doing? | PostHog, Amplitude |
+| Enrichment | Who is this company, really? | Clay, Apollo, Clearbit |
+| Orchestration | How do these systems talk? | n8n, Zapier, Workato |
+| CRM | Where does the revenue team work? | HubSpot, Salesforce |
+
+Each is good at its job. What none of them owns is the **judgement layer**: what a signal actually means,
+what an account is worth, who should work it, what may be said to them, and whether any of it worked.
+That gap gets filled by a spreadsheet, a HubSpot workflow nobody can test, and a scoring formula whose
+author has left. A GTM Engineer is hired to replace that with a system.
+
+GTMOS is that system: the data model, the deterministic engines, the integration boundaries and the
+operating surfaces.
 
 ## What it does
 
-GTMOS runs the full loop:
-
 ```
-TARGET → ENRICH → DETECT SIGNALS → SCORE → RESEARCH → IDENTIFY BUYERS → PERSONALIZE → APPROVE
-       → ROUTE → SYNC CRM → TRACK ENGAGEMENT → CREATE OPPORTUNITY → MEASURE → EXPERIMENT → LEARN
+product signal → enrichment → scoring → routing → workflow → CRM → analytics
 ```
 
-| Question a GTM leader asks | Where GTMOS answers it |
-|---|---|
-| Which companies should we target? | **Accounts**: 2,000 accounts scored against a versioned ICP |
-| Why are they a fit? | **Account page → Why this score**: every point traced to a rule and its evidence |
-| Why contact them now? | **Signals**: funding, AI hiring, launches, exec hires and PLG events, with time decay |
-| Who should we contact? | **Buying committee**: champion, economic buyer, evaluator, sponsor, user, each with reasons |
-| What should we say? | **Research + Outreach**: cited research brief, guardrailed drafts, human approval queue |
-| What happens next? | **Workflows + Routing**: trigger → conditions → actions, explainable routing with conflicts |
-| What is happening in the funnel? | **Overview / Pipeline**: funnel, velocity, stuck accounts, attribution |
-| Which experiments work? | **Experiments**: deterministic assignment, Wilson CIs, z-test, no premature winners |
-| Where is pipeline leaking? | **Copilot + Stack Inspector**: approved analyses, ranked fixes with evidence |
-| Is the GTM stack healthy? | **Stack Inspector / Operations / Data Quality** |
+Concretely: a product event arrives and is matched to an account; enrichment fills in who that company
+is, keeping per-field provenance; an explainable score says how good a fit they are and why *now*;
+routing picks an owner against territories and SLAs; an idempotent workflow executes the steps; reverse
+ETL pushes computed fields into the CRM without touching anything a rep owns; and the analytics layer
+measures whether the whole thing produced pipeline — with the honesty to say when it cannot tell.
 
-### Highlights
+## The golden flow
 
-- **Explainable scoring, and an honest measurement of whether it works.** Fit 35 · Intent 25 · Timing 15 ·
-  Technical 15 · Engagement 10, with half-life decay, grade X exclusions and a reproducible input hash. Then
-  `make backtest` grades it: AUC with confidence intervals, conversion by grade, precision@K — and separates
-  the score into a structural part (firmographics, no leakage) and the total (which includes engagement, and
-  therefore partly predicts itself). On the demo data the structural AUC is 0.537 with an interval that
-  **includes 0.5**, and [the report says so](docs/scoring-evaluation.md) rather than quoting the flattering
-  0.593.
-- **Signals that can say no.** Six of the nineteen signal types are disqualifying — competitor adopted,
-  layoffs, budget freeze, champion departed, unsubscribed, initiative cancelled — and each carries the action
-  it implies. Penalties apply *after* the category caps, because inside a category a full engagement score
-  would absorb a champion's departure entirely.
-- **Clay-style enrichment waterfall that surfaces disagreement.** Per-field provider order, fallbacks on miss,
-  error or low confidence, cost accounting, field-level provenance, and manual locks that are never
-  overwritten. When two confident providers contradict each other, the stored value is **kept** and the
-  disagreement is raised as a data-quality issue — the rejected answer is shown on the account page, because a
-  value three providers agree on and a value one won by 0.05 confidence should not look identical.
-- **Evidence-grounded AI.** Research claims must cite numbered evidence (E1..En) and uncited claims are
-  stripped. Drafts follow *signal → pain → value → proof → CTA* and pass guardrails (no ungrounded numbers, no
-  superlatives, verified signal, reachable contact) before they can be approved.
-- **A real workflow engine.** Idempotency keys per trigger event, persisted step state, retries with backoff,
-  dead letters, manual retry that resumes at the failed step, and inline or Redis/RQ execution.
-- **Safe CRM integration.** A HubSpot adapter boundary that upserts on a custom unique property
-  (`gtmos_account_id`, because HubSpot doesn't enforce `domain` uniqueness), batches of ≤100, 429/5xx retry,
-  payload-hash change detection, and reverse ETL of computed properties.
-- **Signed webhooks.** HMAC with a replay window (n8n and generic senders), token header (PostHog), HubSpot v3
-  verification, dedupe on event id, replayable failures. Rejected deliveries can't poison idempotency keys.
-- **Experiments that can say "do not ship".** Guardrail metrics (bounce, unsubscribe, spam complaint, negative
-  reply) are evaluated one-sided for harm, and a breach outranks any win on the primary metric. The seeded
-  provocative-subject test lifts reply rate 20.7% → 37.0% and is still rejected, because unsubscribes go
-  0.00% → 2.90%, an interval that sits entirely above the 1% ceiling. A minimum detectable effect is reported with every result, so a null reads as "no effect" or
-  "underpowered" rather than ambiguously.
-- **Routing with a clock.** Named accounts no rule can move, a fallback queue so nothing is simply unowned,
-  round robin that stays idempotent across a replay, and a per-rule first-touch SLA. Speed to lead is measured
-  against the first real outbound touch, counts only genuine lead events (a territory reshuffle starts no
-  clock), and keeps "late" separate from "never touched".
-- **Operating surfaces.** Data Quality (12 rules with audited remediation), Stack Inspector — which traces
-  **causal chains**, one account set intersected through every link, and reports the true overlap rather than
-  two true numbers about different accounts — Operations, and a full audit log.
-- **A stop button.** Runtime kill switches for automation, outbound and CRM writes, read from the database on
-  every action so a pause takes effect immediately rather than after a deploy. Blocked requests return `423`
-  with the operator's reason; queued work stays queued.
-- **Safe Copilot.** Question → intent → *approved* metric function → deterministic numbers → explanation. No
-  LLM-generated SQL, ever, and metrics GTMOS does not model (revenue, churn, NPS, CAC) are named as gaps
-  instead of approximated by the nearest metric that shares a word.
-- **A warehouse layer.** A [dbt project](warehouse/) modelling the operational database into analytics marts,
-  with 19 models and 113 tests, checked against the API's semantic layer so the two cannot drift apart.
-- **Evaluation for generated content.** `make llm-eval` grades whichever writer is configured against
-  adversarial cases: invented citations, ungrounded numbers, banned superlatives, and instructions hidden in
-  the evidence. It found a real one — untrusted feed text was being copied verbatim into research reports.
-
-## Demo workflow
-
-The fastest tour (≈10 minutes; full script in [`docs/demo-script.md`](docs/demo-script.md)):
-
-1. **Overview**: the command center; note the DEMO banner and the "Act now" accounts.
-2. **Accounts → Kestrel Analytics** (the flagship). A $120M Series C 12 days ago, a new VP of AI, an AI agent
-   launch, 14 open AI roles, a champion already using the free product. **Why this score** shows every point.
-3. **Buying committee → Research**: the committee's rationale, then a research brief where every sentence
-   links to evidence.
-4. **Run signal → outreach workflow**: enrich → rescore → committee → research → draft → route → CRM sync.
-   The draft **multi-threads to the economic buyer** and references the engaged champion, because the account
-   already has an open opportunity.
-5. **Approvals**: guardrails, reasoning chain and evidence. Approve, or watch a fabricated metric get blocked.
-6. **Workflows → run detail**: step timeline, attempts, idempotency key and correlation id.
-7. **Routing → simulator**: see a high-intent enterprise account beat the territory rule and why.
-8. **Experiments**: open `provocative-subject`. The treatment wins reply rate by 16.3 percentage points with
-   p < 0.001 — and the recommendation is **do not ship**, because unsubscribes went 0.00% → 2.90% and negative
-   replies 2.6% → 10.1%. This is the page to spend time on: optimising reply rate alone is how teams burn a
-   sending domain.
-9. **Data Quality → Stack Inspector → Copilot → Operations**: the system inspecting itself.
-
-| | |
-|---|---|
-| ![The flagship account, with every score component explained](docs/screenshots/03-account-kestrel.png) | ![The ICP, and the backtest that grades it](docs/screenshots/04-scoring.png) |
-| ![An experiment that wins on replies and is still rejected](docs/screenshots/08-experiment-provocative-subject.png) | ![Causal chains traced through one account set](docs/screenshots/12-stack-inspector.png) |
-| ![Attribution models compared on one deal](docs/screenshots/06-pipeline.png) | ![Routing rules and speed to first touch](docs/screenshots/09-routing.png) |
-
-More, with captions: [`docs/screenshots.md`](docs/screenshots.md).
-
-## Architecture
-
-```mermaid
-flowchart LR
-  subgraph Sources
-    PH[PostHog product events]
-    N8N[n8n / external signal feeds]
-    HSI[HubSpot webhooks]
-    EP[Enrichment providers<br/>3 simulated + optional Apollo]
-  end
-
-  subgraph API["FastAPI (apps/api)"]
-    WH[Webhook ingestion<br/>verify · dedupe · store]
-    SIG[Signal engine]
-    SC[Scoring engine<br/>pure, deterministic]
-    ENR[Enrichment waterfall]
-    WF[Workflow engine<br/>idempotent · retries · DLQ]
-    RT[Routing engine]
-    RS[Research + personalization<br/>evidence-grounded]
-    DQ[Data quality]
-    AN[Analytics semantic layer]
-    CP[Copilot<br/>approved metrics only]
-    SI[Stack Inspector]
-    SYNC[CRM sync / reverse ETL]
-  end
-
-  PG[(PostgreSQL<br/>40 tables)]
-  RQ[(Redis + RQ worker)]
-  HS[HubSpot<br/>simulated store or live API]
-  LLM[Claude<br/>optional]
-  WEB["Next.js UI (apps/web)"]
-
-  PH --> WH
-  N8N --> WH
-  HSI --> WH
-  WH --> SIG --> SC --> WF
-  WF --> ENR --> EP
-  WF --> RS -.optional.-> LLM
-  WF --> RT
-  WF --> SYNC --> HS
-  WF <--> RQ
-  SIG & SC & ENR & WF & RT & RS & DQ & SYNC --> PG
-  AN --> PG
-  CP --> AN
-  SI --> AN
-  WEB -->|/api/v1 via Next rewrite| API
-```
-
-- **Deterministic core, AI at the edges.** Scoring, routing, workflow conditions, experiment assignment and
-  statistics, attribution, data quality and analytics are pure functions with unit tests. The LLM only writes
-  prose from a supplied evidence pack, and its output is validated like any other generator's.
-- **Postgres is the source of truth; Redis is delivery.** Workflow runs are rows first. They're enqueued
-  *after commit*, and a sweeper re-enqueues anything stuck in `queued`.
-- **Every mutation is audited** with actor, before/after, reason and correlation id. The actor is caller-asserted in V1 rather than session-derived, which makes this a change log with a name on it rather than a true audit trail — recorded as Finding 5 in [`docs/security-review.md`](docs/security-review.md).
-
-Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`](docs/data-model.md) ·
-[`docs/integrations.md`](docs/integrations.md) · [`docs/warehouse.md`](docs/warehouse.md) ·
-[`docs/n8n.md`](docs/n8n.md).
-
-## GTM concepts demonstrated
-
-| Concept | In GTMOS |
-|---|---|
-| **ICP** | Versioned, validated definition (industries, size bands, regions, technographics, personas, signal budgets, exclusions, weights); preview grade changes before saving |
-| **Enrichment** | Waterfall per field across providers with fallbacks, confidence thresholds, cost, provenance and merge policy |
-| **Signals** | 19 types across intent / timing / engagement, six of them negative, each with source, confidence, strength, evidence, dedupe key and half-life decay |
-| **Scoring** | Explainable 100-point model; fit vs "why now" (intent index); A–D grades; exclusions |
-| **Routing** | Priority → specificity → key conflict resolution, ownership respect, inactive-owner reassignment, least-loaded pools with capacity |
-| **CRM** | Mini-CRM with funnel + deal stages, forward-only lifecycle, stage history, HubSpot object mapping |
-| **Workflows** | Trigger → conditions → actions; idempotent, resumable, retryable, observable |
-| **Outbound** | Campaigns → sequences → steps; sent/delivered/replied/positive/meeting/opportunity/won; opens explicitly untrusted |
-| **Experimentation** | Account-level hash assignment, Wilson intervals, two-proportion z-test, Newcombe CI, minimum sample |
-| **Attribution** | First, last, linear and U-shaped side by side; unattributed share reported |
-| **Reverse ETL** | Computed properties (`gtmos_icp_score`, `gtmos_intent_score`, `gtmos_account_tier`, `gtmos_last_signal`, `gtmos_next_best_action`) pushed with change detection |
-| **Data quality** | Duplicates, invalid emails, missing fields, stale enrichment, orphans, lifecycle conflicts, missing owners, invalid transitions, bad external IDs |
-| **Observability** | Workflow/sync/webhook health, provider hit and error rates, routing latency, correlation IDs, audit log |
-
-A deeper explanation of each, with file references: [`docs/gtm-concepts.md`](docs/gtm-concepts.md).
-
-## Integrations — and exactly how far each one is verified
-
-The stack GTMOS is built to sit inside: **PostHog** watches the product, **Clay** buys enrichment,
-**n8n** moves data between systems, **HubSpot** is where reps work, and GTMOS owns the judgement in the
-middle. The argument for that split is in [`docs/phase3-architecture.md`](docs/phase3-architecture.md);
-the tools themselves are explained in [`docs/gtm-tool-guide.md`](docs/gtm-tool-guide.md).
-
-Verification levels are used strictly, because a project claiming four live integrations it never ran
-is worse than one claiming none:
-
-| | Meaning |
-|---|---|
-| **Verified locally** | Actually executed on this machine, end to end, with evidence |
-| **Verified in simulation** | Runs fully against a simulated counterpart; the live adapter is implemented but unrun |
-| **Ready — needs credentials** | Built against the documented contract and tested against it; never talked to the real service |
-| **Not implemented** | Deliberately absent |
-
-| Integration | Status | What that means concretely |
-|---|---|---|
-| **n8n** | **Verified locally** | Runs in Docker, pinned to `n8nio/n8n:2.40.5`. Six workflows imported and published; **five executed** against the running API. Deduplication proven: one batch delivered three times with different `attemptNumber` values yields one event with `duplicate_count` 0 → 1 → 2. The error workflow was proven by deliberately breaking another workflow. The sixth (`04`) calls `api.hubapi.com` and is reported as **not executed** for want of a token. See [`docs/n8n.md`](docs/n8n.md). |
-| **HubSpot CRM** | **Verified in simulation** · live **ready — needs credentials** | The demo adapter fully works: companies, contacts, deals and associations, batch upsert on a custom unique property, bounded retry, payload-hash change detection, inbound webhooks with v3 **and v1** signature verification. The live adapter is implemented against current documented APIs and has **never run against a real portal**. Setup: [`docs/hubspot-live-setup.md`](docs/hubspot-live-setup.md). |
-| **PostHog** | **Verified in simulation** · live **ready — needs credentials** | The inbound path is exercised continuously: PostHog-shaped events with `$groups.company` resolve to an account, become engagement rows, and feed a composite product-qualified rule. **No PostHog account exists**, so nothing has been received from real PostHog. Note that group analytics is a paid add-on. Setup: [`docs/posthog-live-setup.md`](docs/posthog-live-setup.md). |
-| **Clay** | **Ready — needs credentials** | Boundary built against Clay's documented Public API and signed-webhook contract, tested locally with `httpx.MockTransport` and recorded payloads. **Never run against a live Clay workspace**; no account exists and nothing was purchased. The API itself reports `verified_against_live_clay: false`. Setup: [`docs/clay-live-setup.md`](docs/clay-live-setup.md). |
-| Enrichment providers | **Verified in simulation** · Apollo **ready — needs credentials** | Three simulated providers with coverage gaps, noise, cost and failures, which deliberately disagree with each other. Apollo adapter unrun. |
-| Claude (LLM) | **Ready — needs credentials**, off by default | Deterministic generators without configuration. Live research needs `ANTHROPIC_API_KEY` **and** `LLM_ENABLED=true`; neither was used at any point in building this. |
-| Email / LinkedIn sending | **Not implemented, by design** | "Ready" is the hand-off to a sequencer. Deliverability is modelled as a *constraint*, not an activity. |
-
-### The golden flow
-
-One command runs a single account through every boundary above:
+One command drives a single account through every boundary in the system:
 
 ```bash
 make golden-flow              # 20 steps, direct to the API
@@ -274,178 +85,313 @@ Three people at one company use the product → PostHog-shaped events → n8n no
 GTMOS resolves the account, fires the product-qualified rule, moves the score, triggers a workflow and
 routes an owner → reverse ETL pushes the company and associates its contacts → the CRM sends a change
 webhook back → **the same webhook is delivered again and deduplicated** → analytics, Operations and the
-audit log all reflect it. It is deterministic and replayable; both transports pass all twenty steps.
+audit log all reflect it.
+
+It is deterministic and replayable. Both transports pass all twenty steps. Re-running it under the same
+run key is *supposed* to collide with itself, and the harness reports that as the pass it is.
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph bought["Bought — commodity, do not rebuild"]
+    PH["PostHog<br/>product events · groups = company"]
+    CLAY["Clay<br/>enrichment waterfall · 50+ vendors"]
+    HS["HubSpot<br/>companies · contacts · deals"]
+  end
+
+  subgraph orchestrated["Orchestrated — editable without a deploy"]
+    N8N["n8n 2.40.5<br/>schedules · retries · error workflow"]
+  end
+
+  subgraph built["Built — the judgement layer"]
+    ING["Ingestion<br/>verify · dedupe · replay"]
+    ID["Identity resolution<br/>lead to account"]
+    SIG["Signals<br/>normalise · half-life decay"]
+    PQL["Product-qualified rule"]
+    SCORE["Scoring<br/>explainable · versioned"]
+    ENR["Enrichment merge policy<br/>provenance · conflicts"]
+    RES["Research + copy<br/>evidence-grounded · guardrailed"]
+    ROUTE["Routing<br/>territory · SLA · fallback"]
+    WF["Workflow engine<br/>idempotent · retries · DLQ"]
+    SYNC["Reverse ETL<br/>field ownership"]
+    GOV["Governance<br/>kill switches · audit"]
+    AN["Analytics<br/>attribution · experiments · evaluation"]
+  end
+
+  PG[("PostgreSQL · 40 domain tables<br/>source of truth")]
+  RQ[("Redis + RQ<br/>delivery, not truth")]
+  WEB["Next.js UI"]
+
+  PH -->|"destination webhook"| N8N
+  N8N -->|"normalised · HMAC-signed"| ING
+  CLAY -->|"signed webhook · provenance"| ING
+  HS -->|"change webhook · logged, never applied"| ING
+  ING --> ID --> SIG
+  SIG --> SCORE
+  SIG --> PQL --> WF
+  ENR --> SCORE
+  SCORE --> ROUTE
+  SCORE --> RES
+  WF --> ROUTE
+  WF --> SYNC -->|"gtmos_* fields only"| HS
+  ING --> AN
+  GOV -.->|"can stop any of it"| WF
+  SCORE --> PG
+  WF --> PG
+  AN --> PG
+  WF <--> RQ
+  WEB --> ING
+
+  classDef b fill:#eef2ff,stroke:#4f46e5
+  classDef o fill:#fef3c7,stroke:#d97706
+  classDef g fill:#ecfdf5,stroke:#059669
+  class PH,CLAY,HS b
+  class N8N o
+  class ING,ID,SIG,PQL,SCORE,ENR,RES,ROUTE,WF,SYNC,GOV,AN g
+```
+
+Two rules the diagram encodes. **Postgres is the source of truth and Redis is delivery** — workflow runs
+are rows first, enqueued *after commit*, with a sweeper for anything stuck. And **the deterministic core
+sits inside, AI at the edges** — scoring, routing, workflow conditions, experiment statistics, attribution
+and data quality are pure functions with unit tests; a model only ever writes prose over an evidence pack
+the system already holds.
+
+Detail: [`docs/phase3-architecture.md`](docs/phase3-architecture.md) ·
+[`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`](docs/data-model.md).
+
+## Engineering highlights
+
+**1 · Explainable targeting.** A 100-point score across fit, intent, timing, technical and engagement,
+computed as a pure deterministic function with a versioned ICP and a reproducible input hash. Every point
+traces to a named rule and the evidence that triggered it, and signals decay on a half-life between 14
+and 365 days, so a funding round stops counting long before an unsubscribe does. Six signal types
+subtract.
+
+**2 · Idempotent workflow execution.** Runs are rows with persisted step state, claimed with
+`SELECT … FOR UPDATE SKIP LOCKED`, retried with bounded exponential backoff, dead-lettered on exhaustion
+and resumable afterwards. The concurrency test uses two real database connections on two threads released
+by a barrier, holds each step open to widen the race window, and asserts against three independent
+oracles — because persisted step state alone does not prevent two workers reading the same `pending` rows.
+
+**3 · CRM reconciliation and reverse ETL.** Batch upsert on a custom unique property, because HubSpot does
+**not** deduplicate API-created companies on `domain`. Update payloads contain `gtmos_*` fields and nothing
+else, so a sync cannot overwrite a rep's edit. Inbound changes are logged and never auto-applied, which is
+how the sync loop is broken deliberately rather than by luck. Contacts and deals get **primary**
+association types (1/5), not the general ones (279/341) — the distinction decides whether a record shows
+up in territory reporting or behaves as an orphan.
+
+**4 · GTM experimentation that can reject a winner.** Deterministic account-level assignment, Wilson
+intervals, a minimum detectable effect on every result, and guardrail metrics (bounce, unsubscribe, spam,
+negative reply) evaluated one-sided for harm. A guardrail breach outranks any win on the primary metric.
+
+**5 · Evidence-grounded generation with a trust boundary.** Copy is written over a numbered evidence pack;
+citations are validated, ungrounded numbers are blocked, and nothing can be approved while a blocking
+guardrail fails. Untrusted text — enrichment values, signal titles, activity subjects — passes through a
+sentence-level sanitiser at the boundary, which leaves a visible scar rather than silently editing
+evidence.
+
+**6 · Observability and honest evaluation.** Correlation ids on every run, sync, delivery and provider
+call; an integrations surface whose green states are unreachable without execution; and evaluation
+harnesses that grade the system's own output, report confidence intervals, and say plainly when a result
+cannot support a claim.
+
+## Integration philosophy
+
+The failure mode of a project like this is rebuilding everything so the README can say it replaces a stack
+of well-funded products. The interesting question is what to buy, what to orchestrate, and what to own.
+
+**Buy PostHog** for event capture, person and group identity. B2B GTM is account-shaped, and PostHog's
+group key is what turns a user event into an account fact. GTMOS does not store events or build funnels
+over them. What it does not delegate is what the behaviour *means* — that lives in a product-qualified
+rule with weights someone can argue with.
+
+**Buy Clay** for enrichment. Clay's product is the *provider network*, not the waterfall; you can write a
+waterfall in an afternoon, you cannot negotiate forty data contracts in one. GTMOS implements a waterfall
+over three simulated providers purely to prove the mechanics, and keeps the part Clay does not do: the
+**merge policy**. A Clay value enters through the same provenance and conflict rules as any other
+provider and gets no special authority for having been bought.
+
+**Orchestrate with n8n.** Anything that moves bytes between systems belongs on a canvas a RevOps person
+can edit without a deploy. Anything that *decides revenue* belongs in version control with tests. A Slack
+notification should not need a pull request; a scoring change should.
+
+**Buy HubSpot** as the operational CRM. Reps live there. Rebuilding pipeline management, tasks, sequences
+and permissions is how you end up owning a CRM and losing.
+
+**Build the judgement layer.** The test for whether something belongs in GTMOS: *would a reasonable GTM
+leader want to argue with it?* If yes, it has to be explainable, versioned and diffable — which means code
+you own, not a vendor's black box or a workflow canvas.
+
+Full comparison, including what each vendor charges for:
+[`docs/phase3-tool-research.md`](docs/phase3-tool-research.md). Beginner-friendly version:
+[`docs/gtm-tool-guide.md`](docs/gtm-tool-guide.md).
+
+## Failure handling
+
+The interesting failures, all found by a mechanism built to look for them rather than by re-reading code.
+
+**HubSpot retries that deduplicate nothing.** HubSpot posts an *array* of events and increments
+`attemptNumber` on every retry, so the obvious idempotency key — a hash of the raw body — treats each
+retry as a new event. GTMOS keys on the sorted set of member `eventId` values. An n8n workflow exists
+specifically to prove it: three deliveries, one with a bumped attempt number and one with the array
+reversed, produce one stored event.
+
+**Two workers racing the same run.** Persisted step state is not enough, because both workers read the
+same `pending` rows before either writes. Row-level locking with `SKIP LOCKED` is; the test distinguishes
+it from plain `FOR UPDATE`, which would pass a naive duplication check and still be wrong.
+
+**Stale evidence at approval time.** Guardrails run when a draft is generated and never again. A signal
+retracted while the draft sat in the queue leaves a message citing evidence that no longer resolves — the
+exact failure the evidence pack exists to prevent, arriving through the one door nobody watched. Found by
+accident, written up as open in [`docs/phase3-product-review.md`](docs/phase3-product-review.md).
+
+**Prompt injection through enrichment text.** Setting an account's `industry` to a sentence containing an
+instruction produced a research brief repeating that instruction, *with a citation*. The general lesson:
+a trust boundary is a property of where data comes from, not of which field it lands in — adding an
+integration silently reclassifies fields that were previously safe.
+[`docs/security-review.md`](docs/security-review.md).
+
+**Permanently invalid payloads retried forever.** A malformed body was answered `202` and queued for
+retry indefinitely, because the endpoint could not distinguish "try again" from "this will never work".
+Three existing tests had pinned the buggy behaviour and had to be updated, which is its own lesson about
+what a suite guarantees. [`docs/failure-tournament.md`](docs/failure-tournament.md).
+
+## Evaluation honesty
+
+This is the part of the project most worth reading, and it is deliberately unflattering.
+
+- **A heuristic score is not an ML prediction.** GTMOS ranks with transparent weighted rules. It does not
+  claim calibrated probabilities, and the evaluation reports it as a ranker.
+- **Synthetic evaluation establishes nothing about real-world lift.** Every dataset here is generated.
+  The backtest states this at the top and again in its own machine-written caveats.
+- **Uncertainty is shown, not rounded away.** Wilson intervals on every rate, Hanley–McNeil intervals on
+  AUC, a `small_sample` flag on thin buckets, and a minimum detectable effect on every experiment.
+- **The headline is the unflattering number.** Structural (leakage-free) AUC 0.537 leads; the
+  contaminated 0.593 is shown beside it with an explanation of why it is contaminated.
+- **In-sample checks are labelled in-sample.** The grade thresholds were set on the same accounts that
+  then "validated" them, and the document says so twice rather than once.
+- **A held-out set that is too small says so.** The matcher reports 0.962 precision on 116 held-out cases
+  and states plainly that this cannot be distinguished from 0.90. Two known-fixable failures were left
+  unfixed rather than contaminate the holdout.
+- **Reply lift is not success when guardrails degrade.** The seeded experiment wins its primary metric
+  decisively and is rejected.
+- **The simulation was changed after a bad result, and that is disclosed.** When the grade ladder
+  flattened, the *world* was adjusted so the score would respond to negative signals. The function is
+  named in [`docs/scoring-evaluation.md`](docs/scoring-evaluation.md) so a reader can judge it. You can
+  make a model look good by changing the world it is measured against, and the only defence is saying
+  when you did.
 
 ## Running locally
 
 **Prerequisites:** Docker, Python 3.13 + [uv](https://docs.astral.sh/uv/), Node 20+ (24 tested).
 
 ```bash
-git clone <this repo> gtmos && cd gtmos
-make setup          # uv sync + npm ci
-make dev            # Postgres+Redis in Docker, migrate, seed (~1 min), API :8010 + web :3010
+make setup    # uv sync + npm ci
+make dev      # Postgres + Redis in Docker, migrate, seed (~1 min), API :8010 + web :3010
 ```
 
-Open **http://localhost:3010**. API docs: **http://localhost:8010/docs**.
+Open **http://localhost:3010**. API docs at **http://localhost:8010/docs**.
 
-Or run everything in containers (API, worker, web, Postgres, Redis):
+Everything in containers instead: `make up`. Reload the demo dataset: `make reset`. Optional local n8n on
+:5678: `make n8n`. Host ports are deliberately uncommon (Postgres **56432**, Redis **56379**) to avoid
+clashing with other local services.
 
-```bash
-make up             # web http://localhost:3010 · API http://localhost:8010
-```
+## Tests
 
-Host ports are deliberately uncommon (Postgres **56432**, Redis **56379**) to avoid clashing with other local
-services; override with `GTMOS_DB_PORT`, `GTMOS_REDIS_PORT`, `GTMOS_API_PORT`, `GTMOS_WEB_PORT`.
+Counts below are mechanically produced, not maintained by hand — the commands that produce them are in
+[`docs/phase4-baseline.md`](docs/phase4-baseline.md).
 
-Useful commands: `make reset` (reload the demo dataset), `make n8n` (optional local n8n on :5678),
-`make help` (all targets). Configuration: copy `.env.example` to `.env`; nothing in it is required.
+| Suite | Count | Command |
+|---|---:|---|
+| Backend unit (pytest) | **210** | `make test-unit` |
+| Backend integration (pytest + Postgres) | **255** | `make test-api` |
+| Frontend component (Vitest) | **14** | `make test-web` |
+| End to end (Playwright, production build) | **25** | `make e2e` |
+| Warehouse (dbt **tests**, over 19 **models**) | **113** | `make warehouse` |
 
-## Testing
+`dbt build` prints `TOTAL=132`; that is 19 models **plus** 113 tests, not a test count. Also green: ruff,
+eslint, `mypy --strict`, `tsc`, migrations from empty with no model drift, and both Docker images.
 
-```bash
-make test           # backend unit + integration (Postgres), frontend component tests
-make lint typecheck # ruff + ruff format, ESLint, mypy --strict, tsc
-make e2e            # Playwright smoke suite against a running stack (desktop + mobile)
-make check          # everything above + production web build
-```
+The demo figures quoted across these documents — routing SLA, the experiment, data quality,
+deliverability — are generated into [`docs/demo-numbers.md`](docs/demo-numbers.md) by `make docs-numbers`.
+If prose disagrees with that file, **the generated file is right**.
 
-| Suite | Count | What it covers |
+## Demo versus live
+
+| Integration | Verified how far | What it would take |
 |---|---|---|
-| Backend unit (pytest) | 210 | Scoring including disqualifying signals, the enrichment waterfall and its conflict policy, routing conflicts/round robin/SLAs, committee, experiment and attribution maths, evaluation statistics against hand-computed cases, the content-evaluation graders against a deliberately broken writer, rules, pipeline transitions, matching, research citations, guardrails, live HubSpot/Apollo adapter contracts (mocked HTTP), webhook signatures including HubSpot's v1/v2/v3 schemes, the product-qualified rule, integration status derivation |
-| Backend integration (pytest + Postgres) | 255 | API contracts, signal → workflow → draft → CRM, idempotency, worker concurrency and crash recovery, retries → dead letter → resume, signed webhooks and HubSpot batch dedupe, PQL flow, reverse-ETL idempotency, data quality merges, the scoring backtest's honesty properties, causal chains, experiment guardrails, kill switches, Copilot adversarial attacks, admin-token gating, Clay ingestion and its prompt-injection sanitisation, permanently-invalid payloads rejected rather than retried, integration observability |
-| Frontend (Vitest + Testing Library) | 14 | Formatters, safe markdown (HTML injection), URL helpers, accessible meters, confirm-before-mutate, inline API errors |
-| E2E (Playwright, production build) | 25 | Demo flow, every page renders without error boundaries, mobile has no horizontal scroll, mobile navigation |
-
-Bugs found by these tests and fixed with regression tests include: a waterfall cache miss across positions; an
-unsigned delivery blocking a later valid signed delivery (idempotency-key poisoning); **HubSpot retries never
-deduplicating at all**, because its payload is a JSON array with an incrementing `attemptNumber` so every
-retry hashed differently; an invalid signature returning `200` for a known event id; **two workers executing
-the same workflow run** and duplicating every side effect; a crashed run never being re-enqueued; Data Quality
-sorting a page rather than the table, so an older high-severity issue could never reach the top; the Copilot
-answering "what's the churn rate" with a meeting-rate number; and untrusted signal text being copied verbatim
-into research reports.
-
-## Screenshots
-
-[`docs/screenshots.md`](docs/screenshots.md) is the annotated tour, with a note on each image saying what to
-look at. All of it is the DEMO dataset.
-
-## Design decisions
-
-- **Deterministic first.** Anything that routes revenue or changes CRM state is a pure, tested function. LLMs
-  write prose from evidence and never decide.
-- **Human in the loop for every outbound word.** Drafts go DRAFT → REVIEW → APPROVED → READY; blocking guardrails
-  prevent approval.
-- **Idempotency everywhere.** Unique keys on signals, workflow runs, webhook events and external records;
-  upserts on stable keys; payload hashing to skip unchanged syncs.
-- **Honest data.** Seed data is synthetic and labeled. The simulated providers answer from the same
-  deterministic universe, so enrichment fills real gaps instead of inventing values.
-- **Understandable stack.** FastAPI + SQLAlchemy + Postgres + Redis/RQ + Next.js: boring on purpose, easy to
-  explain, easy to run.
-
-## Production considerations
-
-- **Auth:** V1 runs as a single demo operator. Production needs SSO/OIDC, RBAC (rep vs RevOps vs admin),
-  per-workspace isolation (the schema is already multi-tenant) and row-level authorization.
-- **Scale:** move scoring to incremental recomputation on events, partition activities/engagements by time, add
-  a proper job scheduler for nightly enrichment/DQ/reverse ETL, and put rate-limit budgets on providers.
-- **Warehouse:** the dbt project in [`warehouse/`](warehouse) already models the operational database into
-  analytics marts and its numbers are checked against the API's semantic layer. At scale it would sit behind
-  a replication layer (Fivetran/Airbyte into Snowflake or BigQuery) rather than reading `public` directly, and
-  reverse ETL would sync from there; the contract (keys, hashing, conflict policy) stays the same.
-  See [`docs/warehouse.md`](docs/warehouse.md).
-- **LLM operations:** prompt/version registry, offline evals on a golden set (citation validity, unsupported
-  claim rate), cost budgets and caching.
-
-## The part I would ask about in an interview
-
-A demo is easy to make impressive and hard to make trustworthy. The things I would want a GTM engineer to
-push on are the places where GTMOS reports something inconvenient:
-
-| Claim it would be easy to make | What GTMOS actually reports |
-|---|---|
-| "The score predicts conversion" | Structural AUC **0.537**, interval 0.485–0.589 — not distinguishable from random on this data. The leaking variant scores 0.593 and the report explains exactly why that number is contaminated. |
-| "Attribution shows what worked" | Four models, a deliberately **unattributed tail**, and a worked example where first-touch credits one campaign 100% and last-touch credits a different one 100% on the same deal. |
-| "Our best message won" | The winning subject line is recommended **against**: it lifts replies by **+16.3 pp** (p < 0.001) and takes unsubscribes from **0.00% to 2.90%**, whose whole interval sits above the 1% ceiling. |
-| "Routing is solved" | **78.7%** of decided lead-event assignments met their SLA; **106** were late and **22** were never touched at all — counted separately, because a late touch is a process problem and an untouched one is a leak. |
-| "The AI is grounded" | The evaluation harness found the generator copying attacker-supplied text out of a signal feed into a research report, and that is written up in [`docs/llm-evaluation.md`](docs/llm-evaluation.md). |
-| "The data is clean" | **504** open data-quality issues, including **15** fields where two providers materially disagree and GTMOS refused to pick a winner. |
-| "Lead-to-account matching works" | Precision **0.962** on a held-out set — with a 0.894–0.987 interval and an explicit statement that 116 cases cannot distinguish that from 0.90. The threshold was tuned on a disjoint development set, and two held-out failures were left unfixed rather than burn the holdout. |
-| "The integrations are live" | One of four is verified by execution (n8n). The other three are honest about needing credentials, and the API reports `verified_against_live_clay: false` itself rather than leaving it to the README. |
-
-Every one of those numbers is computed from the demo dataset by code in this repository. The scoring figures
-regenerate with `make backtest`, the matcher's with the held-out harness in `tests/`, and the routing, experiment,
-data-quality and deliverability figures with **`make docs-numbers`**, which writes
-[`docs/demo-numbers.md`](docs/demo-numbers.md).
-
-That last target exists because these four blocks were previously typed by hand, and a review found that four
-of them had drifted far enough that the README claimed the system was *better* than the running app showed —
-the SLA hit rate in particular. A project whose pitch is that it does not overstate cannot leave its headline
-figures unchecked, so they are generated now. If a number in prose disagrees with `docs/demo-numbers.md`, the
-generated file is right.
+| **n8n** | **Verified by execution.** Runs in Docker on a pinned `n8nio/n8n:2.40.5`; six workflows imported and published, five executed against this API. Dedupe and the error handler were each proved deliberately. | Nothing. |
+| **HubSpot** | **Simulated adapter**, exercised end to end, every sync labelled SIMULATED. Live adapter implemented against current documented APIs and **never run against a real portal**. | A free developer test account and a private-app token — about twenty minutes and a human login. [`docs/hubspot-live-setup.md`](docs/hubspot-live-setup.md) |
+| **PostHog** | **Tested locally** against the documented payload shape: events are accepted, deduplicated, normalised and turned into signals. **Nothing has ever arrived from PostHog.** | A project, plus group analytics and a webhook destination — both appear to be paid. [`docs/posthog-live-setup.md`](docs/posthog-live-setup.md) |
+| **Clay** | **Tested locally** against the documented Public API and signed-webhook contract. **Nothing has ever been requested from clay.com.** The API reports `verified_against_live_clay: false` itself. | Two secrets and a paid-tier workspace. [`docs/clay-live-setup.md`](docs/clay-live-setup.md) |
+| Enrichment providers | Three **simulated** providers that deliberately disagree. Apollo adapter implemented, unrun. | An Apollo key. |
+| LLM | **Off by default.** Generation runs on a deterministic writer; no paid model call was made. | `ANTHROPIC_API_KEY` **and** `LLM_ENABLED=true`. |
 
 ## Limitations
 
-- All data is synthetic. No real customers, results or revenue are represented.
-- The real HubSpot, Clay and Apollo adapters are implemented against current documented APIs but have
-  **never run against the live services**; the live Claude path is implemented but disabled, and was not
-  used at any point in building this. No account was created and nothing was purchased for any of them.
-- PostHog's inbound path is exercised continuously, but no event has ever arrived from a real PostHog
-  project. Note also that PostHog's group analytics — which is what makes account-level product signals
-  possible — is a paid add-on.
-- No email sending, no sequencer integration, no calendar integration.
-- Single-tenant UI and demo-safe auth (see Production considerations).
-- The workflow editor is definition-as-data with a read-only visual view, not a drag-and-drop builder.
-- Some operational history (older workflow runs, sync runs, webhook events) is seeded synthetic history and
-  is labeled as such in the UI. Recent runs were actually executed by the engine.
+- **No reconciliation against the remote CRM record.** Change detection compares against what GTMOS last
+  *sent*, never what HubSpot currently *holds*.
+- **No conditional writes**, so a rep editing mid-sync can be overwritten within the fields GTMOS owns.
+- **A draft's cited evidence is never re-validated at approval time.**
+- **No inbound rate limiting.** Deliberate — in production this belongs at the edge, not in application
+  code where a naive in-process limiter gives false confidence across workers.
+- **Single-operator authorisation.** The admin gate is a no-op in demo mode and most mutating routes are
+  ungated; the audit actor is caller-asserted rather than session-derived. Findings 4 and 5 in
+  [`docs/security-review.md`](docs/security-review.md).
+- **Routing rules and workflow definitions are not editable in the product.** The ICP is the only thing an
+  operator can change without a deploy, which sits awkwardly with this project's own argument for n8n.
+- **The approval queue does not group by contact**, so the same person can appear several times.
+- **No supply-chain scanning.**
+- **Every evaluation runs on synthetic data**, and no real outcome labels exist anywhere.
+
+## What I would do next
+
+1. Point the HubSpot adapter at a free developer test account. Everything is built and documented; it
+   needs twenty minutes and a login, and it will surface something the mocks did not.
+2. Close the reconciliation gap — read `remote_updated_at`, add conditional writes.
+3. Re-validate a draft's evidence at approval, with a suppression window per contact.
+4. Make routing rules and workflows editable by an operator.
+5. Get real outcome labels and a randomised holdout. Until then the scoring evaluation's honest ceiling is
+   low, and it says so.
 
 ## Repository layout
 
 ```
-apps/api        FastAPI service: models, domain (pure logic), services, integrations, seed, tests
-apps/web        Next.js app: pages, UI primitives, charts, Vitest + Playwright tests
-integrations/n8n  Importable n8n workflow templates
-warehouse/      dbt project: staging views + analytics marts over the operational database
-docs/           Research, spec, architecture, data model, concepts, integrations, demo script, interview prep
+apps/api          FastAPI service: models, domain (pure logic), services, integrations, seed, tests
+apps/web          Next.js app: pages, UI primitives, charts, Vitest + Playwright tests
+integrations/n8n  Version-controlled n8n workflow definitions
+warehouse/        dbt project: staging views + analytics marts over the operational database
+docs/             Architecture, research, evaluation, security, interview prep, demo scripts
 ```
 
 ## Documentation
 
-**Start here if you are new to GTM tooling:** [The GTM tool guide](docs/gtm-tool-guide.md) explains
-HubSpot, Clay, n8n and PostHog through this repository.
+**New to GTM tooling?** Start with [the GTM tool guide](docs/gtm-tool-guide.md), then
+[the course](docs/gtmos-course.md).
 
-**Architecture and integrations**
-[Phase 3 architecture](docs/phase3-architecture.md) · [Tool research](docs/phase3-tool-research.md) ·
-[Architecture](docs/architecture.md) ·
+**Architecture** · [Phase 3 architecture](docs/phase3-architecture.md) ·
+[Tool research](docs/phase3-tool-research.md) · [Architecture](docs/architecture.md) ·
 [Data model](docs/data-model.md) · [Integrations](docs/integrations.md) ·
-[CRM sync design](docs/crm-sync-design.md) · [Warehouse layer](docs/warehouse.md) ·
-[n8n](docs/n8n.md)
+[CRM sync design](docs/crm-sync-design.md) · [Warehouse](docs/warehouse.md) · [n8n](docs/n8n.md)
 
-**Connecting real services** (none of these have been run live)
-[HubSpot](docs/hubspot-live-setup.md) · [PostHog](docs/posthog-live-setup.md) ·
-[Clay](docs/clay-live-setup.md)
-
-**Evaluation and honesty**
-[Demo numbers (generated)](docs/demo-numbers.md) · [Scoring evaluation](docs/scoring-evaluation.md) ·
-[Scoring backtest](docs/scoring-backtest.md) ·
+**Evaluation and honesty** · [Demo numbers (generated)](docs/demo-numbers.md) ·
+[Scoring evaluation](docs/scoring-evaluation.md) · [Scoring backtest](docs/scoring-backtest.md) ·
 [Matcher evaluation](docs/matcher-evaluation.md) · [Content evaluation](docs/llm-evaluation.md) ·
 [Failure tournament](docs/failure-tournament.md) · [Security review](docs/security-review.md) ·
 [Product review](docs/phase3-product-review.md)
 
-**Reference and interview prep**
-[Market research](docs/market-research.md) · [Product spec](docs/product-spec.md) ·
-[GTM concepts](docs/gtm-concepts.md) · [Demo script](docs/demo-script.md) ·
-[Interview guide](docs/interview-guide.md) · [Interview questions](docs/interview-questions.md) ·
-[Resume bullets](docs/resume.md) · [Screenshots](docs/screenshots.md)
+**Connecting real services** (none has been run live) · [HubSpot](docs/hubspot-live-setup.md) ·
+[PostHog](docs/posthog-live-setup.md) · [Clay](docs/clay-live-setup.md)
 
-**Phase reports**
-[Phase 2 audit](docs/phase2-audit.md) · [Phase 2 final](docs/phase2-final-report.md) ·
-[Phase 3 baseline](docs/phase3-baseline.md) · [Phase 3 final](docs/phase3-final-report.md) ·
-[Phase 3 handoff](docs/phase3-handoff.md)
+**Demos and interview prep** · [3-minute walkthrough](docs/portfolio-demo-script.md) ·
+[60-second version](docs/60-second-demo.md) · [Technical demo](docs/technical-demo.md) ·
+[Course](docs/gtmos-course.md) · [Interview drill](docs/interview-drill.md) ·
+[Interview questions](docs/interview-questions.md) · [GTM concepts](docs/gtm-concepts.md) ·
+[Screenshots](docs/screenshots.md)
 
-**Tool research** (written from official documentation)
-[HubSpot](docs/research/hubspot.md) · [n8n](docs/research/n8n.md) ·
-[PostHog](docs/research/posthog.md) · [Clay](docs/research/clay.md)
+**Project reports** · [Phase 3 final](docs/phase3-final-report.md) ·
+[Phase 3 handoff](docs/phase3-handoff.md) · [Phase 4 baseline](docs/phase4-baseline.md)
 
 ## License
 
