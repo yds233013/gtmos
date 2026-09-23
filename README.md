@@ -205,16 +205,47 @@ Details: [`docs/architecture.md`](docs/architecture.md) · [`docs/data-model.md`
 
 A deeper explanation of each, with file references: [`docs/gtm-concepts.md`](docs/gtm-concepts.md).
 
-## Integrations
+## Integrations — and exactly how far each one is verified
 
-| Integration | Status | Notes |
+The stack GTMOS is built to sit inside: **PostHog** watches the product, **Clay** buys enrichment,
+**n8n** moves data between systems, **HubSpot** is where reps work, and GTMOS owns the judgement in the
+middle. The argument for that split is in [`docs/phase3-architecture.md`](docs/phase3-architecture.md);
+the tools themselves are explained in [`docs/gtm-tool-guide.md`](docs/gtm-tool-guide.md).
+
+Verification levels are used strictly, because a project claiming four live integrations it never ran
+is worse than one claiming none:
+
+| | Meaning |
+|---|---|
+| **Verified locally** | Actually executed on this machine, end to end, with evidence |
+| **Verified in simulation** | Runs fully against a simulated counterpart; the live adapter is implemented but unrun |
+| **Ready — needs credentials** | Built against the documented contract and tested against it; never talked to the real service |
+| **Not implemented** | Deliberately absent |
+
+| Integration | Status | What that means concretely |
 |---|---|---|
-| HubSpot CRM | **DEMO** by default · **OPTIONAL LIVE** | Demo adapter writes a local simulated store and every sync is labeled SIMULATED. The real adapter (batch upsert, retries, custom properties) activates with `HUBSPOT_ACCESS_TOKEN` + `HUBSPOT_LIVE_WRITES_ENABLED=true`. It has **not** been exercised against a live portal. |
-| PostHog | **DEMO** (seeded events) · live-ready ingestion | `POST /api/v1/webhooks/posthog` accepts PostHog-shaped events; `$groups.company` or email domain → account |
-| n8n | **OPTIONAL** | 4 workflow templates in `integrations/n8n/`, verified to import into n8n 2.40.5 (`n8n import:workflow`). Not run against live external feeds. |
-| Enrichment | **DEMO** (3 simulated providers) · **OPTIONAL** Apollo | Simulated providers answer from the deterministic universe with coverage, noise, cost and failures. Apollo adapter untested live. |
-| Claude (LLM) | **DEMO** by default · **OPTIONAL LIVE** | Deterministic generators without configuration. Live research needs `ANTHROPIC_API_KEY` **and** `LLM_ENABLED=true`. |
-| Email / LinkedIn sending | **Not implemented, by design** | "Ready" is the hand-off to a sequencer. |
+| **n8n** | **Verified locally** | Runs in Docker, pinned to `n8nio/n8n:2.40.5`. Six workflows imported, published and **executed** against the running API. Deduplication proven: one batch delivered three times with different `attemptNumber` values yields one event with `duplicate_count` 0 → 1 → 2. The error workflow was proven by deliberately breaking another workflow. One workflow (`04`) calls `api.hubapi.com` and is reported as **not executed** for want of a token. See [`docs/n8n.md`](docs/n8n.md). |
+| **HubSpot CRM** | **Verified in simulation** · live **ready — needs credentials** | The demo adapter fully works: companies, contacts, deals and associations, batch upsert on a custom unique property, bounded retry, payload-hash change detection, inbound webhooks with v3 **and v1** signature verification. The live adapter is implemented against current documented APIs and has **never run against a real portal**. Setup: [`docs/hubspot-live-setup.md`](docs/hubspot-live-setup.md). |
+| **PostHog** | **Verified in simulation** · live **ready — needs credentials** | The inbound path is exercised continuously: PostHog-shaped events with `$groups.company` resolve to an account, become engagement rows, and feed a composite product-qualified rule. **No PostHog account exists**, so nothing has been received from real PostHog. Note that group analytics is a paid add-on. Setup: [`docs/posthog-live-setup.md`](docs/posthog-live-setup.md). |
+| **Clay** | **Ready — needs credentials** | Boundary built against Clay's documented Public API and signed-webhook contract, tested locally with `httpx.MockTransport` and recorded payloads. **Never run against a live Clay workspace**; no account exists and nothing was purchased. The API itself reports `verified_against_live_clay: false`. Setup: [`docs/clay-live-setup.md`](docs/clay-live-setup.md). |
+| Enrichment providers | **Verified in simulation** · Apollo **ready — needs credentials** | Three simulated providers with coverage gaps, noise, cost and failures, which deliberately disagree with each other. Apollo adapter unrun. |
+| Claude (LLM) | **Ready — needs credentials**, off by default | Deterministic generators without configuration. Live research needs `ANTHROPIC_API_KEY` **and** `LLM_ENABLED=true`; neither was used at any point in building this. |
+| Email / LinkedIn sending | **Not implemented, by design** | "Ready" is the hand-off to a sequencer. Deliverability is modelled as a *constraint*, not an activity. |
+
+### The golden flow
+
+One command runs a single account through every boundary above:
+
+```bash
+make golden-flow              # 20 steps, direct to the API
+VIA_N8N=1 make golden-flow    # the same, routed through the real n8n container
+```
+
+Three people at one company use the product → PostHog-shaped events → n8n normalises and signs them →
+GTMOS resolves the account, fires the product-qualified rule, moves the score, triggers a workflow and
+routes an owner → reverse ETL pushes the company and associates its contacts → the CRM sends a change
+webhook back → **the same webhook is delivered again and deduplicated** → analytics, Operations and the
+audit log all reflect it. It is deterministic and replayable; both transports pass all twenty steps.
 
 ## Running locally
 
@@ -310,6 +341,8 @@ push on are the places where GTMOS reports something inconvenient:
 | "Routing is solved" | 84% of lead-event assignments met their SLA; 98 were late and 9 were never touched at all. |
 | "The AI is grounded" | The evaluation harness found the generator copying attacker-supplied text out of a signal feed into a research report, and that is written up in [`docs/llm-evaluation.md`](docs/llm-evaluation.md). |
 | "The data is clean" | 499 open data-quality issues, including 18 fields where two providers materially disagree and GTMOS refused to pick a winner. |
+| "Lead-to-account matching works" | Precision **0.962** on a held-out set — with a 0.894–0.987 interval and an explicit statement that 116 cases cannot distinguish that from 0.90. The threshold was tuned on a disjoint development set, and two held-out failures were left unfixed rather than burn the holdout. |
+| "The integrations are live" | One of four is verified by execution (n8n). The other three are honest about needing credentials, and the API reports `verified_against_live_clay: false` itself rather than leaving it to the README. |
 
 Every one of those numbers is computed from the demo dataset by code in this repository, and every one of them
 is reproducible with `make reset && make backtest`.
@@ -317,8 +350,12 @@ is reproducible with `make reset && make backtest`.
 ## Limitations
 
 - All data is synthetic. No real customers, results or revenue are represented.
-- The real HubSpot and Apollo adapters are implemented against documented APIs but untested against live
-  accounts; the live Claude path is implemented but disabled unless explicitly enabled.
+- The real HubSpot, Clay and Apollo adapters are implemented against current documented APIs but have
+  **never run against the live services**; the live Claude path is implemented but disabled, and was not
+  used at any point in building this. No account was created and nothing was purchased for any of them.
+- PostHog's inbound path is exercised continuously, but no event has ever arrived from a real PostHog
+  project. Note also that PostHog's group analytics — which is what makes account-level product signals
+  possible — is a paid add-on.
 - No email sending, no sequencer integration, no calendar integration.
 - Single-tenant UI and demo-safe auth (see Production considerations).
 - The workflow editor is definition-as-data with a read-only visual view, not a drag-and-drop builder.
@@ -337,13 +374,37 @@ docs/           Research, spec, architecture, data model, concepts, integrations
 
 ## Documentation
 
+**Start here if you are new to GTM tooling:** [The GTM tool guide](docs/gtm-tool-guide.md) explains
+HubSpot, Clay, n8n and PostHog through this repository.
+
+**Architecture and integrations**
+[Phase 3 architecture](docs/phase3-architecture.md) · [Architecture](docs/architecture.md) ·
+[Data model](docs/data-model.md) · [Integrations](docs/integrations.md) ·
+[CRM sync design](docs/crm-sync-design.md) · [Warehouse layer](docs/warehouse.md) ·
+[n8n](docs/n8n.md)
+
+**Connecting real services** (none of these have been run live)
+[HubSpot](docs/hubspot-live-setup.md) · [PostHog](docs/posthog-live-setup.md) ·
+[Clay](docs/clay-live-setup.md)
+
+**Evaluation and honesty**
+[Scoring evaluation](docs/scoring-evaluation.md) · [Scoring backtest](docs/scoring-backtest.md) ·
+[Matcher evaluation](docs/matcher-evaluation.md) · [Content evaluation](docs/llm-evaluation.md) ·
+[Failure tournament](docs/failure-tournament.md) · [Security review](docs/security-review.md)
+
+**Reference and interview prep**
 [Market research](docs/market-research.md) · [Product spec](docs/product-spec.md) ·
-[Architecture](docs/architecture.md) · [Data model](docs/data-model.md) ·
-[GTM concepts](docs/gtm-concepts.md) · [Integrations](docs/integrations.md) ·
-[Warehouse layer](docs/warehouse.md) · [n8n](docs/n8n.md) ·
-[Demo script](docs/demo-script.md) · [Interview guide](docs/interview-guide.md) ·
-[Interview questions](docs/interview-questions.md) · [Resume bullets](docs/resume.md) ·
-[Final review](docs/final-review.md)
+[GTM concepts](docs/gtm-concepts.md) · [Demo script](docs/demo-script.md) ·
+[Interview guide](docs/interview-guide.md) · [Interview questions](docs/interview-questions.md) ·
+[Resume bullets](docs/resume.md) · [Screenshots](docs/screenshots.md)
+
+**Phase reports**
+[Phase 2 audit](docs/phase2-audit.md) · [Phase 2 final](docs/phase2-final-report.md) ·
+[Phase 3 baseline](docs/phase3-baseline.md) · [Phase 3 final](docs/phase3-final-report.md)
+
+**Tool research** (written from official documentation)
+[HubSpot](docs/research/hubspot.md) · [n8n](docs/research/n8n.md) ·
+[PostHog](docs/research/posthog.md) · [Clay](docs/research/clay.md)
 
 ## License
 
