@@ -564,7 +564,11 @@ def committee_clear(
 
 
 class ResearchBody(BaseModel):
-    use_llm: bool = True
+    # Defaults to False, not True. This field decides whether a request can cause a billed model
+    # call, and a permissive default on such a field is the kind of thing that only looks harmless
+    # until the endpoint is reachable from the internet with a key configured. The UI asks for it
+    # explicitly; a direct caller has to as well.
+    use_llm: bool = False
 
 
 @router.post("/{account_id}/research")

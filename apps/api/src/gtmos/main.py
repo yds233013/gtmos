@@ -30,6 +30,17 @@ from gtmos.services.signal_service import InvalidSignal
 
 log = logging.getLogger("gtmos.api")
 
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+#: POSTs that compute an answer and write nothing, so a read-only public instance can still serve
+#: them. Keep in step with the routes; `tests/integration/test_read_only.py` fails if one disappears.
+READ_ONLY_POST_ALLOWLIST = frozenset(
+    {
+        "/api/v1/icp/preview",
+        "/api/v1/routing/simulate",
+        "/api/v1/copilot/ask",
+    }
+)
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -50,6 +61,38 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
         allow_credentials=False,
     )
+
+    @app.middleware("http")
+    async def enforce_read_only(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """Refuse every write when `READ_ONLY=true`, for a publicly reachable demo instance.
+
+        Off by default, so local development and the test suite are untouched.
+
+        A middleware rather than a dependency on purpose. A dependency has to be attached to every
+        router, and the next route somebody adds is the one that forgets — which is how this gap
+        appeared in the first place: of 36 mutating routes, four are genuinely gated and 24 have no
+        gate to be a no-op of. A method check at the edge cannot be forgotten, and it covers the
+        webhook and replay paths without naming them.
+
+        The allow-list is the point. Three POSTs compute and return an answer without writing a row,
+        and they are the three most interesting things a visitor can actually *do*: re-grade 2,006
+        accounts against a changed ICP threshold, simulate a routing decision, and ask the copilot a
+        question. Losing those would make the demo a slideshow. `test_read_only.py` pins them.
+        """
+        if (
+            settings.read_only
+            and request.method not in SAFE_METHODS
+            and request.url.path not in READ_ONLY_POST_ALLOWLIST
+        ):
+            return JSONResponse(
+                {
+                    "error": "This is a public read-only demo, so write actions are disabled. "
+                    "Clone the repository and run `make up` to use them.",
+                    "request_id": request.headers.get("x-request-id"),
+                },
+                status_code=403,
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:

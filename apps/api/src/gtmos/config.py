@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     llm_model: str = "claude-opus-5"
 
     # HubSpot (optional). Without a token the demo adapter is used and every sync is labeled SIMULATED.
+    #: Refuse every write at the edge. For a publicly reachable demo instance; off everywhere else.
+    #: Of this API's 36 mutating routes, four are admin-gated and 24 have no gate at all, which is
+    #: fine on a laptop and not fine on the internet. Enforced in `main.enforce_read_only`.
+    read_only: bool = False
+
     hubspot_access_token: SecretStr | None = None
     hubspot_webhook_client_secret: SecretStr | None = None
     hubspot_live_writes_enabled: bool = False

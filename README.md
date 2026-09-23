@@ -41,6 +41,41 @@ If you have five minutes: open `/integrations`, then `/experiments/provocative-s
 
 ---
 
+## Demo
+
+Five screens, chosen because each one shows the system making a judgement you can check — not because
+they show volume. Every figure is computed live from the database.
+
+**It says how far each connection has actually got.** Two independent axes, mode and verification, and
+no "Connected" badge anywhere, because three of these four have never reached the vendor.
+
+![Integrations](docs/screenshots/13-integrations.png)
+
+**It rejects the message that won.** +16.3 pp on reply rate at p < 0.001, and the recommendation is
+*do not ship*, because unsubscribes went from 0.00% to 2.90%.
+
+![Experiment](docs/screenshots/08-experiment-provocative-subject.png)
+
+**It grades its own model and publishes the bad number.** Leakage-free AUC 0.537 with an interval that
+includes 0.5, reported ahead of the flattering 0.593, with the contamination explained.
+
+![Scoring evaluation](docs/screenshots/04-scoring.png)
+
+**Every point traces to a rule.** 98 out of 100, decomposed across five categories, each line carrying
+its evidence, confidence and half-life decay.
+
+![Account intelligence](docs/screenshots/03-account-kestrel.png)
+
+**Generated prose cites numbered evidence, and inferences are labelled as inferences.** A claim whose
+citation does not resolve is removed before the brief is shown; the brief never becomes CRM truth.
+
+![Research brief](docs/screenshots/19-research.png)
+
+The rest of the set — signals, pipeline, routing, workflows, data quality, the stack inspector,
+operations, the approval queue and a mobile view — is in [`docs/screenshots.md`](docs/screenshots.md).
+
+---
+
 ## The problem
 
 A modern go-to-market team runs on four kinds of system, and none of them talks to the others.

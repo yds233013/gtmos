@@ -4,7 +4,7 @@ Every screen below is the running app in demo mode against the seeded **syntheti
 
 Every figure in a caption describes **the shot above it**, not the app as it is running right now. Several of these pages report rolling windows, so a live page will drift from its screenshot by a signal or a tenth of a percent between captures. Where they disagree, the live app is current and the caption is a record of what was captured; the figures that are supposed to hold steady are generated into [`demo-numbers.md`](demo-numbers.md) instead.
 
-Captured at 1440x900, 2x pixel density, light mode. Pages that run past a few screens (accounts, scoring, signals, pipeline, routing, workflows, data quality, stack inspector, operations) were shot in a taller viewport rather than as a full-page ribbon, so the panels that matter stay readable.
+Captured at 1440x900, 2x pixel density, light mode. Pages that run past a few screens (accounts, scoring, signals, pipeline, routing, workflows, data quality, stack inspector, operations, research) were shot in a taller viewport rather than as a full-page ribbon, so the panels that matter stay readable.
 
 ## 1. Overview — command centre
 
@@ -34,7 +34,7 @@ The weights and signal point budgets are editable and versioned, and the "Does t
 
 ![Signal feed](screenshots/05-signals.png)
 
-1,935 signals over 30 days, each with its source, confidence and strength, alongside the decay rules (per-type half-life and category point caps) that decide how much an old signal is still worth.
+1,927 signals over 30 days, each with its source, confidence and strength, alongside the decay rules (per-type half-life and category point caps) that decide how much an old signal is still worth.
 
 ## 6. Pipeline and attribution
 
@@ -58,7 +58,7 @@ The treatment beat control on reply rate by +16.3pp (p < 0.001) and the recommen
 
 ![Routing rules and speed to first touch](screenshots/09-routing.png)
 
-Seven priority-ordered rules with a stated conflict-resolution policy and a dry-run simulator, above a speed-to-first-touch panel that names the misses: 79% met the SLA, 106 touched late, 22 never touched at all, broken out per rule.
+Seven priority-ordered rules with a stated conflict-resolution policy, and a dry run that shows its working — the winning rule, the rule that also matched and lost, and why it lost (priority 30 against 20) — above a speed-to-first-touch panel that names the misses: 79% met the SLA, 106 touched late, 22 never touched at all, broken out per rule.
 
 ## 10. Workflows
 
@@ -88,7 +88,7 @@ The honest version of "what are we connected to": only n8n is verified by execut
 
 ![Operations and failure observability](screenshots/14-operations.png)
 
-Failure-first observability: a 10.8% workflow failure rate leads the page, and each dead-lettered run names the failing step, the simulated upstream error and a correlation id that ties it to the records it touched.
+Failure-first observability: a 10.7% workflow failure rate leads the page, and each dead-lettered run names the failing step, the simulated upstream error and a correlation id that ties it to the records it touched.
 
 ## 15. Approvals
 
@@ -113,3 +113,9 @@ One "Pause all automation" kill switch plus three separate switches for automati
 ![Overview on a Pixel 7 viewport](screenshots/18-mobile-overview.png)
 
 The same overview at 412x915: the sidebar collapses to a menu button, the demo banner stays visible and the metric tiles reflow to two columns without horizontal scrolling.
+
+## 19. Account research — an evidence-grounded brief
+
+![Research brief with numbered citations](screenshots/19-research.png)
+
+Every claim in the brief cites numbered records from the 31-item evidence pack beside it, inferences are badged **Hypothesis** rather than stated as fact, and any claim whose citation does not resolve is removed before the brief is displayed. The panel names the generator that wrote it (a deterministic demo generator that only restates evidence), keeps the brief a draft that never becomes CRM truth on its own, and offers exactly two decisions: mark reviewed, or reject.
