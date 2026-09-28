@@ -89,7 +89,16 @@ export default async function IntegrationsPage() {
         <PostureLegend modes={status.modes} levels={status.verification_levels} />
         <p className="mt-4 border-t border-border pt-3 text-[11px] text-muted">
           A boundary is only green when requests have genuinely been exchanged with a real running instance of the
-          tool. Nothing is labelled &ldquo;Connected&rdquo;, because three of these four have never been.
+          tool. Nothing is labelled &ldquo;Connected&rdquo;, because{" "}
+          {/* Derived, not written. This sentence used to say "three of these four", which was true on a
+              laptop that had run the n8n container and wrong the moment it was deployed to a freshly
+              seeded host where nothing has been reached. How many is a fact about the instance. */}
+          {reached === 0
+            ? "none of these has ever been"
+            : reached === items.length
+              ? "that has to be earned"
+              : `${items.length - reached} of these ${items.length} have never been`}
+          .
         </p>
       </Panel>
 
