@@ -218,6 +218,39 @@ above all others is **that the link still works in six months.**
 
 ---
 
+## 2.5 · What was actually deployed
+
+This section records the deployment as built, which differs from the recommendation below in one
+respect: **Railway was chosen over Hetzner** because the account already existed, the measured
+footprint made it cheap, and it needs no operator.
+
+| | |
+|---|---|
+| Provider | Railway (Hobby) |
+| Services | `web` (Next.js), `api` (FastAPI), `Postgres`. **No Redis and no worker** — `QUEUE_BACKEND=inline` |
+| Public URL | https://web-production-51214.up.railway.app |
+| API URL | https://api-production-7bc4.up.railway.app |
+| Build | `deploy/Dockerfile.api` and `deploy/Dockerfile.web`, selected per service with `RAILWAY_DOCKERFILE_PATH` |
+| Migrations | `alembic upgrade head && python -m gtmos.seed --if-empty` in the API's start command |
+| Health check | `/health/ready` |
+| Internal networking | web → `http://api.railway.internal:8000`, baked at build time because the Next rewrite resolves then |
+| Reseed | `.github/workflows/demo-reseed.yml`, daily at 04:17 UTC |
+
+**Measured footprint**, taken from the production images on Linux after exercising every page:
+web 131 MB, api 125 MB, Postgres 108 MB — **364 MB total**, with CPU at 0.00–0.32% idle. At Railway's
+$10/GB/month that is ~$3.55 of memory, ~$0.60 of CPU and ~$0.01 of volume: **≈$4.16/month**, inside the
+$5 Hobby credit. The earlier $21/month worst case assumed 512 MB per container and is disproven.
+
+### Two things that did not work, recorded so nobody repeats them
+
+- **`railway up` always uploads the git root**, ignoring both the working directory and a path
+  argument (`prefix not found`). The per-service root directory is not exposed over the CLI. Hence the
+  two root-context Dockerfiles in `deploy/`, which duplicate the compose ones with `apps/*` prefixes.
+- **`RAILWAY_CONFIG_PATH` was not honoured**, so a cron service built from `deploy/railway.reseed.json`
+  ignored both its `startCommand` and its `cronSchedule` and came up as a second always-on API. It was
+  deleted within minutes. The reseed runs on GitHub Actions instead, which is free on a public
+  repository and needs no second container.
+
 ## 3 · Recommendation
 
 **One Hetzner CX23, running the repository's existing `docker compose`, behind Caddy for TLS.

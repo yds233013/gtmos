@@ -1,0 +1,55 @@
+# Keeps the public demo from ageing into a dead system.
+#
+# Every date in the seeded dataset is generated relative to the moment of seeding
+# (`seed/generator.py`, `anchor = datetime.now(UTC)...`). The overview's 90-day cohort funnel, the
+# "last 30 days" signal counts, the routing SLA window and the experiment window are all computed
+# against wall-clock now, so a single seed left alone renders a live-looking product as an empty one
+# within months. This is a product requirement, not housekeeping.
+#
+# The reset is deterministic: fixed RNG seeds and uuid5 ids throughout, so the workspace id, the
+# flagship account id and every deep link survive it. Bookmarked URLs keep working and the committed
+# screenshots stay accurate.
+#
+# Runs on GitHub's scheduler rather than a Railway cron service, because that is free on a public
+# repository and needs no second always-on container.
+
+name: Reseed public demo
+
+on:
+  schedule:
+    # 04:17 UTC daily — a quiet hour. Reseeding truncates every table and takes about a minute, during
+    # which the demo serves a partially populated dataset.
+    - cron: "17 4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: demo-reseed
+  cancel-in-progress: false
+
+jobs:
+  reseed:
+    runs-on: ubuntu-latest
+    # Without the token the job cannot do anything, so skip rather than fail a scheduled run daily.
+    if: ${{ github.repository == 'yds233013/gtmos' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Reseed
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN is not set — skipping. See docs/deployment-plan.md."
+            exit 0
+          fi
+          npm i -g @railway/cli
+          railway run --service api -- python -m gtmos.seed --reset
+
+      - name: Verify the demo came back up
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://api-production-7bc4.up.railway.app/health/ready || true)
+            if [ "$code" = "200" ]; then echo "healthy"; exit 0; fi
+            sleep 10
+          done
+          echo "demo did not return to healthy after reseed"; exit 1

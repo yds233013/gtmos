@@ -3,6 +3,14 @@
 **An AI-native GTM control plane: it connects product signals, enrichment, CRM state and custom decision
 logic to work out which accounts deserve attention, why now, who owns them, and whether any of it worked.**
 
+### ▶ [Live demo](https://web-production-51214.up.railway.app) · read-only · synthetic data
+
+No sign-in. Every write is refused at the edge, so nothing you click can change anything — that is
+enforced server-side, not by disabling buttons. Start at
+[`/integrations`](https://web-production-51214.up.railway.app/integrations), then
+[the rejected experiment](https://web-production-51214.up.railway.app/experiments/provocative-subject),
+then [the flagship account](https://web-production-51214.up.railway.app/accounts/c5c23567-74a1-5483-bc14-224b4eb057e6).
+
 ![Command center](docs/screenshots/01-overview.png)
 
 > **Everything here is DEMO data.** GTMOS ships with a deterministic, synthetic dataset for a fictional
@@ -10,6 +18,12 @@ logic to work out which accounts deserve attention, why now, who owns them, and 
 > reserved `.example` domains. **It has never sent an email or a message to anyone**, and no paid model
 > call was made building it. Each integration is labelled with exactly how far it has been verified,
 > which for three of the four is "never talked to the vendor".
+>
+> **On the hosted demo that count is stricter still.** The integrations page reports what has happened
+> *on the instance you are looking at*, and the hosted one is reseeded nightly, so it has no execution
+> history and says **0 of 4**. The "1 of 4 verified by execution" claim below refers to n8n running
+> against a local stack, with the transcript in [`docs/n8n.md`](docs/n8n.md). Both numbers are honest;
+> they answer different questions.
 
 ---
 

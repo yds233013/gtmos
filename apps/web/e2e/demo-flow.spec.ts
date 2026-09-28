@@ -60,10 +60,21 @@ test.describe("GTMOS demo flow", () => {
   });
 
   test("integrations page states how far each boundary has actually been verified", async ({ page }) => {
+    // The expectation is derived from the API rather than hardcoded, because the honest answer is a
+    // property of the *instance*, not of the codebase. A developer laptop that has run the n8n
+    // container reports one boundary reached; a freshly seeded public deployment has reached none and
+    // says "0 of 4". Both are correct, and an assertion pinned to either number fails on the other —
+    // this test asserted 3 and broke the first time it ran against production.
+    const status = await page.request.get("/api/v1/integrations/status?days=7");
+    expect(status.ok()).toBeTruthy();
+    const body = await status.json();
+    const unreached = body.integrations.filter((i: { reached_real_service: boolean }) => !i.reached_real_service);
+
     await page.goto("/integrations");
     await expect(page.getByRole("heading", { name: "Integrations", level: 1 })).toBeVisible();
-    // Only n8n has ever run against a real instance, and the page must keep saying so.
-    await expect(page.getByText("Real service never reached")).toHaveCount(3);
+    await expect(page.getByText("Real service never reached")).toHaveCount(unreached.length);
+    await expect(page.getByText(`${body.integrations.length - unreached.length} of ${body.integrations.length}`)).toBeVisible();
+    // Whatever the counts, no boundary may ever be badged as connected.
     await expect(page.getByText("Connected", { exact: true })).toHaveCount(0);
   });
 

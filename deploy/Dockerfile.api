@@ -1,0 +1,24 @@
+# GTMOS API, built from the REPOSITORY ROOT as context.
+#
+# `apps/api/Dockerfile` is the one `docker compose` uses, and its COPY paths are relative to
+# `apps/api/`. Railway uploads the whole git repository as the build context and offers no
+# per-service root directory over its CLI, so this file is the same image expressed against a
+# root context. The two must be kept in step; the only differences are the `apps/api/` prefixes.
+FROM python:3.13-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
+WORKDIR /app
+
+# Dependencies first for layer caching.
+COPY apps/api/pyproject.toml apps/api/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY apps/api/src ./src
+COPY apps/api/migrations ./migrations
+COPY apps/api/alembic.ini ./
+RUN uv sync --frozen --no-dev && useradd --create-home --uid 10001 gtmos
+ENV PATH="/app/.venv/bin:$PATH"
+USER gtmos
+EXPOSE 8000
+# Railway supplies $PORT and runs its own healthcheck against /health/ready, so no HEALTHCHECK here.
+CMD ["sh", "-c", "alembic upgrade head && python -m gtmos.seed --if-empty && exec uvicorn gtmos.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
