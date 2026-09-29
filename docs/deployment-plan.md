@@ -234,7 +234,7 @@ footprint made it cheap, and it needs no operator.
 | Migrations | `alembic upgrade head && python -m gtmos.seed --if-empty` in the API's start command |
 | Health check | `/health/ready` |
 | Internal networking | web → `http://api.railway.internal:8000`, baked at build time because the Next rewrite resolves then |
-| Reseed | `.github/workflows/demo-reseed.yml`, daily at 04:17 UTC |
+| Reseed | Railway **cron service** `reseed`, `17 4 * * *`, running `python -m gtmos.seed --reset` |
 
 **Measured footprint**, taken from the production images on Linux after exercising every page:
 web 131 MB, api 125 MB, Postgres 108 MB — **364 MB total**, with CPU at 0.00–0.32% idle. At Railway's
@@ -246,10 +246,21 @@ $5 Hobby credit. The earlier $21/month worst case assumed 512 MB per container a
 - **`railway up` always uploads the git root**, ignoring both the working directory and a path
   argument (`prefix not found`). The per-service root directory is not exposed over the CLI. Hence the
   two root-context Dockerfiles in `deploy/`, which duplicate the compose ones with `apps/*` prefixes.
-- **`RAILWAY_CONFIG_PATH` was not honoured**, so a cron service built from `deploy/railway.reseed.json`
-  ignored both its `startCommand` and its `cronSchedule` and came up as a second always-on API. It was
-  deleted within minutes. The reseed runs on GitHub Actions instead, which is free on a public
-  repository and needs no second container.
+- **`RAILWAY_CONFIG_PATH` was not honoured**, so a first attempt at a cron service — built from a
+  `railway.json` naming its own config path — ignored both its `startCommand` and its `cronSchedule`
+  and came up as a second always-on API. It was deleted within minutes.
+
+  The working route is the **GraphQL API**, not config-as-code: `serviceInstanceUpdate` accepts
+  `cronSchedule`, `startCommand` and `dockerfilePath` directly, and the CLI exposes it through
+  `railway api`. That is how the `reseed` service is configured.
+
+- **GitHub Actions cannot do this job**, which is worth recording because it looks like it should.
+  `railway run` is documented as running the command *locally*; it injects the service's variables
+  into the runner rather than executing inside the container. Since this project's Postgres is
+  private-only — there is no `DATABASE_PUBLIC_URL` and no TCP proxy — the runner has no route to the
+  database. Making it work would need either `railway ssh` (which additionally requires a registered
+  SSH key, so a private key in CI secrets) or a public database endpoint. Both are worse than a cron
+  service that runs inside the private network with no credentials at all.
 
 ## 3 · Recommendation
 
